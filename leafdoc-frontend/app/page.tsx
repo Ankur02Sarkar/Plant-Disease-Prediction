@@ -3,7 +3,9 @@
 import { useReducer, useState } from "react";
 import { FileUpload } from "@/components/file-upload";
 import { AnalysisResultDisplay } from "@/components/analysis-result";
-import { analyzePlantImage, type AnalysisResult } from "@/lib/gemini";
+import { ComparisonView } from "@/components/comparison-view";
+import { type AnalysisResult } from "@/lib/gemini";
+import { analyzeImageAction } from "@/app/actions/analyze";
 import { Leaf, History, Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -45,15 +47,26 @@ function reducer(state: State, action: Action): State {
 
 export default function Home() {
   const [state, dispatch] = useReducer(reducer, { status: "IDLE" });
+  /* eslint-disable @typescript-eslint/no-unused-vars */
   const [history, setHistory] = useState<AnalysisResult[]>([]);
+  const [comparisonList, setComparisonList] = useState<AnalysisResult[]>([]);
 
   const handleFileSelect = async (file: File) => {
     dispatch({ type: "START_ANALYSIS" });
     
+    // Create FormData for Server Action
+    const formData = new FormData();
+    formData.append("file", file);
+
     try {
-      const result = await analyzePlantImage(file);
-      dispatch({ type: "ANALYSIS_SUCCESS", payload: result });
-      setHistory(prev => [result, ...prev]);
+      const result = await analyzeImageAction(formData);
+      
+      if (result.success && result.data) {
+        dispatch({ type: "ANALYSIS_SUCCESS", payload: result.data });
+        setHistory(prev => [result.data!, ...prev]);
+      } else {
+        throw new Error(result.error || "Analysis failed");
+      }
     } catch (error) {
       dispatch({ type: "ANALYSIS_ERROR", payload: error instanceof Error ? error.message : "An unexpected error occurred" });
     }
@@ -63,18 +76,27 @@ export default function Home() {
     dispatch({ type: "RESET" });
   };
 
+  const addToComparison = (result: AnalysisResult) => {
+    if (comparisonList.length < 5 && !comparisonList.includes(result)) {
+        setComparisonList(prev => [...prev, result]);
+    }
+  };
+
+  const removeFromComparison = (index: number) => {
+    setComparisonList(prev => prev.filter((_, i) => i !== index));
+  };
+  
+  const clearComparison = () => {
+    setComparisonList([]);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-14 items-center justify-between mx-auto px-4">
-          <div className="flex items-center gap-2 font-bold text-xl text-primary">
-            <Leaf className="h-6 w-6" />
-            <span>LeafDoc</span>
-          </div>
-          
-          <Sheet>
+      <main className="flex-1 container mx-auto px-4 py-8 max-w-4xl relative">
+        <div className="absolute top-4 right-4 z-40">
+           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
+              <Button variant="outline" size="icon">
                 <History className="h-5 w-5" />
                 <span className="sr-only">History</span>
               </Button>
@@ -107,9 +129,6 @@ export default function Home() {
             </SheetContent>
           </Sheet>
         </div>
-      </header>
-
-      <main className="flex-1 container mx-auto px-4 py-8 max-w-4xl">
         <div className="space-y-8">
           <div className="text-center space-y-2">
             <h1 className="text-3xl font-bold sm:text-4xl md:text-5xl">Plant Disease Detector</h1>
@@ -137,10 +156,24 @@ export default function Home() {
                </div>
              ) : (
                 <div className="space-y-6">
-                    <Button variant="outline" onClick={handleReset} className="mb-4 group">
-                        <ArrowLeft className="mr-2 h-4 w-4 transition-transform group-hover:-translate-x-1" />
-                        Analyze Another
-                    </Button>
+                    <div className="flex flex-wrap gap-4 mb-4">
+                        <Button variant="outline" onClick={handleReset} className="group">
+                            <ArrowLeft className="mr-2 h-4 w-4 transition-transform group-hover:-translate-x-1" />
+                            Analyze Another
+                        </Button>
+                        <Button variant="secondary" onClick={() => addToComparison(state.result)} disabled={comparisonList.some(i => i === state.result)}>
+                            Add to Compare
+                        </Button>
+                    </div>
+                    
+                    {comparisonList.length > 0 && (
+                        <ComparisonView 
+                            items={comparisonList} 
+                            onRemove={removeFromComparison} 
+                            onClear={clearComparison}
+                        />
+                    )}
+                    
                     <AnalysisResultDisplay result={state.result} />
                 </div>
              )}
