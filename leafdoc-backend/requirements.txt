@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+tensorflow
+pillow
+numpy
+scikit-learn
+pytest
+httpx
+python-dotenv
