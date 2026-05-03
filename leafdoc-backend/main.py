@@ -1,34 +1,87 @@
+"""
+LeafDoc FastAPI backend.
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uvicorn
-import tensorflow as tf
-import numpy as np
-import json
-import os
-from PIL import Image
+Endpoints
+---------
+GET  /                    – health ping
+GET  /health              – detailed health (model_loaded, classes_count, ...)
+GET  /supported-classes   – list of classes the custom model can predict, grouped by species
+POST /predict             – classify an uploaded image; returns AnalysisResult or rejection
+POST /qna                 – Gemini-backed Q&A about a previously identified disease
+
+Inference flow for /predict:
+  1. Run leaf-vs-not-leaf gate. If leaf_prob < LEAF_THRESHOLD -> respond status="not_a_leaf".
+  2. Run main 38-class disease classifier.
+  3. If top confidence < CONFIDENCE_THRESHOLD OR entropy > ENTROPY_THRESHOLD
+     -> respond status="out_of_scope".
+  4. Otherwise enrich with disease_info.json and return status="ok".
+"""
+
+from __future__ import annotations
+
 import io
+import json
 import logging
-from typing import List, Dict, Any
+import math
+import os
+from typing import Any, Dict, List, Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+import numpy as np
+import tensorflow as tf
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+from pydantic import BaseModel, Field
+
+# ----------------------------------------------------------------------------
+# Configuration
+# ----------------------------------------------------------------------------
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI
-app = FastAPI(
-    title="Plant Disease Prediction API",
-    description="API for detecting plant diseases from images",
-    version="1.0.0"
-)
-
-# Load environment variables
 MODEL_PATH = os.getenv("MODEL_PATH", "models/plant_disease_model.keras")
-CLASS_INDICES_PATH = "models/class_indices.json"
+LEAF_CLASSIFIER_PATH = os.getenv("LEAF_CLASSIFIER_PATH", "models/leaf_classifier.keras")
+CLASS_INDICES_PATH = os.getenv("CLASS_INDICES_PATH", "models/class_indices.json")
+DISEASE_INFO_PATH = os.getenv("DISEASE_INFO_PATH", "models/disease_info.json")
+
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
-# CORS Middleware
+# Thresholds (tunable via .env). The Colab notebook prints a calibrated value
+# for LEAF_THRESHOLD. CONFIDENCE_THRESHOLD and ENTROPY_THRESHOLD are heuristic;
+# tweak them if the model rejects too aggressively or not aggressively enough.
+LEAF_THRESHOLD = float(os.getenv("LEAF_THRESHOLD", "0.5"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.60"))
+ENTROPY_THRESHOLD = float(os.getenv("ENTROPY_THRESHOLD", "2.5"))  # max possible for 38 classes ≈ 3.64
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+
+IMG_SIZE = (224, 224)
+
+# ----------------------------------------------------------------------------
+# Module-level state (populated on startup)
+# ----------------------------------------------------------------------------
+
+disease_model: Optional[tf.keras.Model] = None
+leaf_model: Optional[tf.keras.Model] = None
+class_names: List[str] = []
+disease_info: Dict[str, Any] = {}
+
+# ----------------------------------------------------------------------------
+# App
+# ----------------------------------------------------------------------------
+
+app = FastAPI(
+    title="LeafDoc Plant Disease Prediction API",
+    description="Custom MobileNetV3 classifier for plant leaf diseases + Gemini-backed Q&A.",
+    version="2.0.0",
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -37,107 +90,345 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variables for model and class names
-model = None
-class_names = []
 
-# Mock database of generic treatments (would be replaced by real DB or detailed JSON)
-TREATMENTS = {
-    "healthy": {
-        "prevention": "Continue regular care.",
-        "action": "Monitor for any changes."
-    },
-    "default": {
-        "prevention": "Ensure proper spacing, watering, and soil health.",
-        "action": "Isolate affected plant, remove diseased parts, apply appropriate fungicide/bactericide."
-    }
-}
+# ----------------------------------------------------------------------------
+# Startup
+# ----------------------------------------------------------------------------
 
 @app.on_event("startup")
-async def startup_event():
-    global model, class_names
-    try:
-        if os.path.exists(MODEL_PATH):
-            logger.info(f"Loading model from {MODEL_PATH}...")
-            model = tf.keras.models.load_model(MODEL_PATH)
-            logger.info("Model loaded successfully.")
-        else:
-            logger.warning(f"Model not found at {MODEL_PATH}. API will not be able to predict.")
+async def startup_event() -> None:
+    global disease_model, leaf_model, class_names, disease_info
 
-        if os.path.exists(CLASS_INDICES_PATH):
-            with open(CLASS_INDICES_PATH, 'r') as f:
-                class_names = json.load(f)
-            logger.info(f"Loaded {len(class_names)} classes.")
-        else:
-            logger.warning(f"Class indices not found at {CLASS_INDICES_PATH}.")
-            
-    except Exception as e:
-        logger.error(f"Error loading model: {e}")
+    if os.path.exists(MODEL_PATH):
+        try:
+            logger.info("Loading disease classifier from %s ...", MODEL_PATH)
+            disease_model = tf.keras.models.load_model(MODEL_PATH)
+            logger.info("Disease classifier loaded.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load disease classifier: %s", exc)
+    else:
+        logger.warning(
+            "Disease model not found at %s. Train on Colab and drop the file in models/.",
+            MODEL_PATH,
+        )
 
-def preprocess_image(image_bytes: bytes) -> np.ndarray:
+    if os.path.exists(LEAF_CLASSIFIER_PATH):
+        try:
+            logger.info("Loading leaf gate from %s ...", LEAF_CLASSIFIER_PATH)
+            leaf_model = tf.keras.models.load_model(LEAF_CLASSIFIER_PATH)
+            logger.info("Leaf gate loaded.")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to load leaf gate: %s", exc)
+    else:
+        logger.warning(
+            "Leaf classifier not found at %s. /predict will skip the leaf gate.",
+            LEAF_CLASSIFIER_PATH,
+        )
+
+    if os.path.exists(CLASS_INDICES_PATH):
+        with open(CLASS_INDICES_PATH, "r") as f:
+            class_names = json.load(f)
+        logger.info("Loaded %d class names.", len(class_names))
+    else:
+        logger.warning("Class indices missing at %s.", CLASS_INDICES_PATH)
+
+    if os.path.exists(DISEASE_INFO_PATH):
+        with open(DISEASE_INFO_PATH, "r") as f:
+            disease_info = json.load(f)
+        logger.info("Loaded disease info for %d entries.", len(disease_info) - 1)  # minus _meta
+    else:
+        logger.warning("Disease info JSON missing at %s.", DISEASE_INFO_PATH)
+
+
+# ----------------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------------
+
+def _decode_image(image_bytes: bytes) -> np.ndarray:
     try:
-        image = Image.open(io.BytesIO(image_bytes))
-        image = image.resize((224, 224))
-        img_array = tf.keras.preprocessing.image.img_to_array(image)
-        # MobileNetV3 expects specific preprocessing possibly, but we used a preprocessing layer in the model?
-        # In train_model.py: x = tf.keras.applications.mobilenet_v3.preprocess_input(x)
-        # Since that is PART OF THE MODEL (we built it that way), we just need to pass the image array.
-        # But `img_to_array` returns 0-255 float.
-        # The model's preprocessing layer usually expects 0-255 inputs if it's included in the model.
-        img_array = np.expand_dims(img_array, axis=0)
-        return img_array
-    except Exception as e:
-        raise HTTPException(status_code=400, detail="Invalid image format")
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize(IMG_SIZE)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Invalid image format") from exc
+    arr = np.array(img, dtype=np.float32)
+    return np.expand_dims(arr, axis=0)  # (1, 224, 224, 3)
+
+
+def _entropy(probs: np.ndarray) -> float:
+    eps = 1e-12
+    return float(-np.sum(probs * np.log(probs + eps)))
+
+
+def _is_healthy(class_name: str) -> bool:
+    return class_name.lower().endswith("___healthy") or class_name.lower().endswith("_healthy")
+
+
+def _humanize(class_name: str) -> str:
+    """`Apple___Apple_scab` -> `Apple - Apple scab`."""
+    if "___" in class_name:
+        plant, disease = class_name.split("___", 1)
+        return f"{plant.replace('_', ' ').strip()} – {disease.replace('_', ' ').strip()}"
+    return class_name.replace("_", " ").strip()
+
+
+def _info_for(class_name: str) -> Dict[str, Any]:
+    """Look up enrichment data; gracefully handle missing entries."""
+    entry = disease_info.get(class_name)
+    if not entry:
+        return {
+            "description": "No additional information is available for this class.",
+            "symptoms": [],
+            "treatment": ["Consult an agricultural extension officer."],
+            "prevention": ["Maintain good agricultural practices."],
+            "severity_baseline": 50,
+            "progression": [],
+            "environmentalFactors": {
+                "temperature": "Unknown",
+                "humidity": "Unknown",
+                "sunlight": "Unknown",
+                "watering": "Unknown",
+            },
+        }
+    return entry
+
+
+def _build_analysis_result(
+    class_name: str, confidence: float, top_predictions: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    info = _info_for(class_name)
+    healthy = _is_healthy(class_name)
+    severity = 0.0 if healthy else round(info.get("severity_baseline", 50) * confidence, 1)
+    return {
+        "status": "ok",
+        "isHealthy": healthy,
+        "diseaseName": _humanize(class_name) if not healthy else "Healthy",
+        "rawClassName": class_name,
+        "confidence": round(confidence * 100, 2),
+        "description": info.get("description", ""),
+        "symptoms": info.get("symptoms", []),
+        "treatment": info.get("treatment", []),
+        "prevention": info.get("prevention", []),
+        "severity": severity,
+        "progression": info.get("progression", []),
+        "environmentalFactors": info.get("environmentalFactors", {}),
+        "topPredictions": top_predictions,
+    }
+
+
+# ----------------------------------------------------------------------------
+# Routes
+# ----------------------------------------------------------------------------
 
 @app.get("/")
-def read_root():
+def root() -> Dict[str, str]:
     return {"message": "Plant Disease Prediction API is running"}
 
+
+@app.get("/health")
+def health() -> Dict[str, Any]:
+    return {
+        "model_loaded": disease_model is not None,
+        "leaf_model_loaded": leaf_model is not None,
+        "classes_count": len(class_names),
+        "disease_info_loaded": bool(disease_info),
+        "thresholds": {
+            "leaf": LEAF_THRESHOLD,
+            "confidence": CONFIDENCE_THRESHOLD,
+            "entropy": ENTROPY_THRESHOLD,
+        },
+    }
+
+
+@app.get("/supported-classes")
+def supported_classes() -> Dict[str, Any]:
+    """Group class_indices.json by plant species so the frontend can render a coverage list."""
+    by_species: Dict[str, List[str]] = {}
+    for cls in class_names:
+        if "___" in cls:
+            plant, disease = cls.split("___", 1)
+            plant_label = plant.replace("_", " ").strip()
+            disease_label = disease.replace("_", " ").strip()
+        else:
+            plant_label, disease_label = "Other", cls
+        by_species.setdefault(plant_label, []).append(disease_label)
+
+    return {
+        "total_classes": len(class_names),
+        "species_count": len(by_species),
+        "by_species": by_species,
+        "limitations": [
+            "Pests (insects, mites) other than two-spotted spider mite on tomato are not directly identified.",
+            "Nutrient deficiencies (N, P, K, micronutrients) are not detected.",
+            "Environmental damage (sunburn, frost, herbicide, drought stress) is not detected.",
+            "Only 14 plant species are supported. Anything outside this list will be flagged as out-of-scope.",
+            "Whole-plant or fruit-only conditions are typically not detected from a single leaf image.",
+        ],
+        "fallback_advice": "For images outside the supported list, use the Gemini provider for open-ended analysis.",
+    }
+
+
 @app.post("/predict")
-async def predict_disease(file: UploadFile = File(...)):
-    if not model or not class_names:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    
-    if not file.content_type.startswith("image/"):
+async def predict(file: UploadFile = File(...)) -> Dict[str, Any]:
+    if disease_model is None or not class_names:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Disease model not loaded. Train it on Colab and place "
+                "plant_disease_model.keras + class_indices.json in models/."
+            ),
+        )
+
+    if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    try:
-        contents = await file.read()
-        processed_image = preprocess_image(contents)
-        
-        predictions = model.predict(processed_image)
-        score = tf.nn.softmax(predictions[0]) # if model output is logits. 
-        # Wait, in train_model.py I used `activation='softmax'`. So predictions[0] is already probabilities.
-        probabilities = predictions[0]
-        
-        predicted_class_index = np.argmax(probabilities)
-        predicted_class = class_names[predicted_class_index]
-        confidence = float(probabilities[predicted_class_index])
-        
-        # Get top 3
-        top_3_indices = probabilities.argsort()[-3:][::-1]
-        top_3_predictions = [
-            {"disease": class_names[i], "probability": float(probabilities[i])}
-            for i in top_3_indices
-        ]
-        
-        # Get treatment info
-        treatment_info = TREATMENTS.get(predicted_class.split("___")[-1], TREATMENTS.get("default"))
-        if "healthy" in predicted_class:
-             treatment_info = TREATMENTS["healthy"]
+    contents = await file.read()
+    img_array = _decode_image(contents)
 
+    # Gate 1: leaf-vs-not-leaf
+    leaf_prob: Optional[float] = None
+    if leaf_model is not None:
+        try:
+            leaf_pred = leaf_model.predict(img_array, verbose=0)
+            leaf_prob = float(leaf_pred.flatten()[0])
+            if leaf_prob < LEAF_THRESHOLD:
+                return {
+                    "status": "not_a_leaf",
+                    "isHealthy": False,
+                    "diseaseName": "Not a leaf",
+                    "rawClassName": None,
+                    "confidence": round((1 - leaf_prob) * 100, 2),
+                    "leafProbability": round(leaf_prob * 100, 2),
+                    "message": (
+                        "The image doesn't appear to contain a plant leaf. "
+                        "Upload a clearer leaf photo, or use the Gemini provider for general image analysis."
+                    ),
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Leaf gate inference failed: %s", exc)
+
+    # Gate 2 + 3: disease classifier with confidence/entropy thresholds
+    try:
+        probabilities = disease_model.predict(img_array, verbose=0)[0]
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Disease model inference failed.")
+        raise HTTPException(status_code=500, detail=f"Inference failed: {exc}") from exc
+
+    top_idx = int(np.argmax(probabilities))
+    top_confidence = float(probabilities[top_idx])
+    top_class = class_names[top_idx]
+
+    top_3 = probabilities.argsort()[-3:][::-1]
+    top_predictions = [
+        {
+            "className": class_names[i],
+            "label": _humanize(class_names[i]),
+            "probability": round(float(probabilities[i]) * 100, 2),
+        }
+        for i in top_3
+    ]
+
+    entropy = _entropy(probabilities)
+
+    if top_confidence < CONFIDENCE_THRESHOLD or entropy > ENTROPY_THRESHOLD:
+        reason = []
+        if top_confidence < CONFIDENCE_THRESHOLD:
+            reason.append(f"low confidence ({top_confidence * 100:.1f}%)")
+        if entropy > ENTROPY_THRESHOLD:
+            reason.append(f"high prediction entropy ({entropy:.2f})")
         return {
-            "prediction": predicted_class,
-            "confidence": confidence,
-            "top_3_predictions": top_3_predictions,
-            "disease_stage": "Unknown", # Requires more specific logic/models
-            "prevention": treatment_info["prevention"],
-            "action": treatment_info["action"]
+            "status": "out_of_scope",
+            "isHealthy": False,
+            "diseaseName": "Could not confidently identify",
+            "rawClassName": None,
+            "confidence": round(top_confidence * 100, 2),
+            "entropy": round(entropy, 3),
+            "leafProbability": round(leaf_prob * 100, 2) if leaf_prob is not None else None,
+            "message": (
+                f"This image looks like a leaf but the model couldn't confidently match any of the "
+                f"{len(class_names)} supported classes ({'; '.join(reason)}). "
+                "Try the Gemini provider for open-ended analysis."
+            ),
+            "topPredictions": top_predictions,
         }
 
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+    result = _build_analysis_result(top_class, top_confidence, top_predictions)
+    if leaf_prob is not None:
+        result["leafProbability"] = round(leaf_prob * 100, 2)
+    return result
+
+
+# ----------------------------------------------------------------------------
+# Q&A endpoint (Gemini)
+# ----------------------------------------------------------------------------
+
+class QnaMessage(BaseModel):
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str
+
+
+class QnaRequest(BaseModel):
+    disease_name: str
+    question: str
+    history: List[QnaMessage] = []
+
+
+@app.post("/qna")
+async def qna(req: QnaRequest) -> Dict[str, Any]:
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is not configured in the backend .env file.",
+        )
+
+    # Lazy import so the backend still boots without the SDK installed
+    try:
+        from google import genai  # type: ignore
+        from google.genai import types as genai_types  # type: ignore
+    except ImportError as exc:  # pragma: no cover
+        raise HTTPException(
+            status_code=500,
+            detail="google-genai is not installed. Run `pip install -r requirements.txt`.",
+        ) from exc
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    system_instruction = (
+        "You are LeafDoc, a friendly and knowledgeable plant pathology assistant. "
+        f"The user has just been told their plant has: '{req.disease_name}'. "
+        "Answer their follow-up questions about this disease — symptoms, treatment options, "
+        "prevention, severity, environmental factors, organic alternatives, regional considerations, etc. "
+        "Keep answers concise (2–4 short paragraphs), practical, and grounded in established agricultural science. "
+        "If the user asks about something outside plant pathology, briefly redirect them. "
+        "Use simple bullet points when listing actions."
+    )
+
+    contents: List[genai_types.Content] = []
+    for msg in req.history:
+        role = "user" if msg.role == "user" else "model"
+        contents.append(
+            genai_types.Content(role=role, parts=[genai_types.Part.from_text(text=msg.content)])
+        )
+    contents.append(
+        genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=req.question)])
+    )
+
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=contents,
+            config=genai_types.GenerateContentConfig(system_instruction=system_instruction),
+        )
+        answer = (response.text or "").strip()
+        if not answer:
+            answer = "I couldn't generate a response. Please try rephrasing your question."
+        return {"answer": answer}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Gemini Q&A failed.")
+        raise HTTPException(status_code=502, detail=f"Gemini call failed: {exc}") from exc
+
+
+# ----------------------------------------------------------------------------
+# Entrypoint
+# ----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,6 +1,6 @@
 "use client";
 
-import { AnalysisResult } from "@/lib/gemini";
+import type { AnalysisResult } from "@/lib/gemini";
 import {
   Card,
   CardContent,
@@ -68,7 +68,7 @@ export function ComparisonView({ items, onRemove, onClear }: ComparisonViewProps
                     <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
                         <div 
                             className="h-full bg-primary transition-all" 
-                            style={{ width: `${result.severity}%`, backgroundColor: result.severity > 50 ? 'var(--destructive)' : 'var(--primary)' }}
+                            style={{ width: `${result.severity ?? 0}%`, backgroundColor: (result.severity ?? 0) > 50 ? 'var(--destructive)' : 'var(--primary)' }}
                         />
                     </div>
                 </div>
@@ -78,11 +78,11 @@ export function ComparisonView({ items, onRemove, onClear }: ComparisonViewProps
                     <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className="bg-muted p-2 rounded">
                             <span className="block text-muted-foreground">Temp</span>
-                            <span className="font-medium truncate">{result.environmentalFactors.temperature}</span>
+                            <span className="font-medium truncate">{result.environmentalFactors?.temperature ?? "—"}</span>
                         </div>
                          <div className="bg-muted p-2 rounded">
                             <span className="block text-muted-foreground">Humidity</span>
-                            <span className="font-medium truncate">{result.environmentalFactors.humidity}</span>
+                            <span className="font-medium truncate">{result.environmentalFactors?.humidity ?? "—"}</span>
                         </div>
                     </div>
                 </div>
@@ -90,7 +90,7 @@ export function ComparisonView({ items, onRemove, onClear }: ComparisonViewProps
                 <div className="space-y-1">
                      <p className="text-sm font-medium">Top Symptom</p>
                      <p className="text-sm text-muted-foreground whitespace-normal line-clamp-2">
-                        {result.symptoms[0]}
+                        {result.symptoms?.[0] ?? "No symptoms recorded."}
                      </p>
                 </div>
               </CardContent>

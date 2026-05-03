@@ -1,41 +1,121 @@
+"""Smoke tests for the FastAPI endpoints.
 
+These intentionally avoid loading actual ML models – they validate routing,
+request validation and edge cases. Real-model end-to-end tests should be added
+once a `.keras` file is dropped in `models/`.
+"""
+
+import io
+from typing import Any, Dict
+
+import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
+
+import main
 from main import app
-import os
-import unittest
-from unittest.mock import MagicMock, patch
 
-client = TestClient(app)
 
-class TestAPI(unittest.TestCase):
-    
-    def test_read_main(self):
-        response = client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"message": "Plant Disease Prediction API is running"})
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app)
 
-    @patch('main.model')
-    @patch('main.class_names')
-    def test_predict_endpoint_no_model(self, mock_class_names, mock_model):
-        # Simulate model not loaded
-        from main import app
-        # We need to temporarily set the global variables in main module to None/Empty
-        # However, due to how imports work, patching `main.model` might work if we reload or accessing it correctly.
-        # But `main.py` checks globals `model` and `class_names`.
-        
-        # Actually proper way to test "no model loaded" is difficult if it loads on startup.
-        # But we can mock the `predict` function or passing a file.
-        pass
 
-    def test_predict_invalid_file_type(self):
-        # Mock model is loaded (we need to trick the app, or just test the file type check which happens first?)
-        # The app checks `if not model` first.
-        # So we can't test file type unless model is loaded.
-        pass
-        
-    # Since we can't easily mock the global startup event result without more complex setup, 
-    # and we don't have the model yet, these tests are placeholders for now.
-    # But we can write a test that creates a dummy model file and runs against it?
-    # Or just wait until we have the model.
-    
-    pass
+# ---------------------------------------------------------------------------
+# /
+# ---------------------------------------------------------------------------
+
+def test_root(client: TestClient) -> None:
+    res = client.get("/")
+    assert res.status_code == 200
+    assert res.json() == {"message": "Plant Disease Prediction API is running"}
+
+
+# ---------------------------------------------------------------------------
+# /health
+# ---------------------------------------------------------------------------
+
+def test_health_shape(client: TestClient) -> None:
+    res = client.get("/health")
+    assert res.status_code == 200
+    body = res.json()
+    for key in (
+        "model_loaded",
+        "leaf_model_loaded",
+        "classes_count",
+        "disease_info_loaded",
+        "thresholds",
+    ):
+        assert key in body, f"missing key {key!r} in /health response"
+    assert {"leaf", "confidence", "entropy"}.issubset(body["thresholds"].keys())
+
+
+# ---------------------------------------------------------------------------
+# /supported-classes
+# ---------------------------------------------------------------------------
+
+def test_supported_classes(client: TestClient) -> None:
+    res = client.get("/supported-classes")
+    assert res.status_code == 200
+    body = res.json()
+    assert "by_species" in body
+    assert "limitations" in body
+    assert body["total_classes"] == len(main.class_names)
+
+
+# ---------------------------------------------------------------------------
+# /predict
+# ---------------------------------------------------------------------------
+
+def _make_png_bytes(size: tuple[int, int] = (32, 32)) -> bytes:
+    img = Image.new("RGB", size, color=(0, 128, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_predict_no_file(client: TestClient) -> None:
+    res = client.post("/predict")
+    assert res.status_code == 422  # FastAPI validation error
+
+
+def test_predict_non_image(client: TestClient) -> None:
+    res = client.post(
+        "/predict",
+        files={"file": ("foo.txt", b"not an image", "text/plain")},
+    )
+    # If model not loaded -> 503; if loaded -> 400 due to non-image content type.
+    assert res.status_code in (400, 503)
+
+
+def test_predict_with_image_when_model_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Force "model not loaded" code path
+    monkeypatch.setattr(main, "disease_model", None)
+    monkeypatch.setattr(main, "class_names", [])
+    res = client.post(
+        "/predict",
+        files={"file": ("leaf.png", _make_png_bytes(), "image/png")},
+    )
+    assert res.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# /qna
+# ---------------------------------------------------------------------------
+
+def test_qna_validation_missing_fields(client: TestClient) -> None:
+    res = client.post("/qna", json={})
+    assert res.status_code == 422
+
+
+def test_qna_without_gemini_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main, "GEMINI_API_KEY", "")
+    payload: Dict[str, Any] = {
+        "disease_name": "Tomato – Early blight",
+        "question": "How do I treat this organically?",
+    }
+    res = client.post("/qna", json=payload)
+    assert res.status_code == 503
+    assert "GEMINI_API_KEY" in res.json()["detail"]

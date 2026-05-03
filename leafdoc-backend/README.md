@@ -1,84 +1,234 @@
-# Plant Disease Prediction System
+# LeafDoc Backend
 
-A Deep Learning-based system for detecting plant diseases from images, featuring a FastAPI backend and a MobileNetV3 model.
+FastAPI service that wraps a **MobileNetV3** plant-disease classifier and a
+**leaf-vs-not-leaf** gate trained on Google Colab, plus a Gemini-backed Q&A
+endpoint for follow-up questions about a detected disease.
+
+> **Heads up:** training has moved to Google Colab (free T4 GPU). See
+> [`colab/README.md`](colab/README.md) for the full training walkthrough.
+> The local `train_model.py` is kept only as a fallback.
+
+---
+
+## Architecture
+
+```
+        ┌──────────────────────────────────────────────┐
+        │  POST /predict (image)                       │
+        │    1. leaf_classifier.keras  →  is it a leaf?│
+        │    2. plant_disease_model.keras → which class?│
+        │    3. confidence + entropy thresholds        │
+        │    4. enrich with disease_info.json          │
+        │    →  AnalysisResult | not_a_leaf | out_of_scope
+        └──────────────────────────────────────────────┘
+
+        POST /qna  (disease_name, question, history[])
+                       │
+                       └──►  Gemini (server-side)
+
+        GET  /health             health + thresholds
+        GET  /supported-classes  list of classes the model can predict
+```
+
+---
 
 ## Prerequisites
 
-- Python 3.9 or higher
-- `pip` package manager
-- Virtual environment tool (`venv` or `virtualenv`)
+- Python 3.10+
+- A trained model produced by [`colab/train_on_colab.ipynb`](colab/train_on_colab.ipynb)
+- (Optional) A Gemini API key for the `/qna` endpoint
 
-## Installation
+---
 
-1.  **Clone the repository:**
+## Install
 
-    ```bash
-    git clone <repository_url>
-    cd leafdoc-backend
-    ```
+```bash
+cd leafdoc-backend
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-2.  **Create and activate a virtual environment:**
+> **Important:** after running the Colab notebook for the first time, replace the
+> bare `tensorflow` line in `requirements.txt` with the exact version printed in
+> the notebook (e.g. `tensorflow==2.20.0`). This avoids `.keras` load errors.
 
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-    ```
+---
 
-3.  **Install dependencies:**
+## Drop in the trained models
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+After running the Colab notebook, place these three files inside `models/`:
 
-4.  **Environment Configuration:**
-    Ensure a `.env` file exists in the root directory with the following content:
-    ```env
-    MODEL_PATH=models/plant_disease_model.keras
-    ALLOWED_ORIGINS=*
-    DEBUG=True
-    ```
+```
+models/
+├── plant_disease_model.keras   # 38-class disease classifier
+├── class_indices.json          # ordered class name list
+├── leaf_classifier.keras       # binary leaf-vs-not-leaf gate
+└── disease_info.json           # already shipped with the repo
+```
 
-## Dataset
+---
 
-The project expects the Kaggle "New Plant Diseases Dataset" to be located at `kaggle-model/New Plant Diseases Dataset(Augmented)/New Plant Diseases Dataset(Augmented)`.
-Ensure the directory structure contains `train` and `valid` folders with class subdirectories.
+## Configure `.env`
 
-## Training the Model
+```env
+MODEL_PATH=models/plant_disease_model.keras
+LEAF_CLASSIFIER_PATH=models/leaf_classifier.keras
+CLASS_INDICES_PATH=models/class_indices.json
+DISEASE_INFO_PATH=models/disease_info.json
 
-To train the MobileNetV3 model on your dataset:
+LEAF_THRESHOLD=0.5            # use the value the Colab notebook prints
+CONFIDENCE_THRESHOLD=0.60
+ENTROPY_THRESHOLD=2.5
 
-1.  Ensure the virtual environment is active.
-2.  Run the training script:
-    ```bash
-    python train_model.py
-    ```
-    This will:
-    - Augment and preprocess the data.
-    - Train the model for the specified number of epochs.
-    - Save the best model to `models/plant_disease_model.keras`.
-    - Save class indices to `models/class_indices.json`.
+ALLOWED_ORIGINS=*
 
-## Running the API
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.0-flash-lite
+```
 
-To start the FastAPI server:
+---
+
+## Run
 
 ```bash
 uvicorn main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`.
+The API is now at `http://localhost:8000`. Interactive docs at `/docs`.
 
-## API Usage
+---
 
-- **Documentation:** Visit `http://localhost:8000/docs` for the interactive Swagger UI.
-- **Prediction Endpoint:** `POST /predict`
-  - **Input:** Image file (binary).
-  - **Response:** JSON containing the predicted disease, confidence score, top 3 probabilities, and prevention/action recommendations.
+## Endpoints
 
-## Testing
+### `GET /health`
 
-Run unit tests using pytest:
+```json
+{
+  "model_loaded": true,
+  "leaf_model_loaded": true,
+  "classes_count": 38,
+  "disease_info_loaded": true,
+  "thresholds": { "leaf": 0.5, "confidence": 0.6, "entropy": 2.5 }
+}
+```
+
+### `GET /supported-classes`
+
+Lists what the custom model can recognize, grouped by plant species, plus an
+explicit list of limitations.
+
+### `POST /predict`
+
+Multipart upload `file=<image>`. Returns one of three response shapes:
+
+**1. `status: "ok"` — successful classification**
+
+```json
+{
+  "status": "ok",
+  "isHealthy": false,
+  "diseaseName": "Tomato – Early blight",
+  "rawClassName": "Tomato___Early_blight",
+  "confidence": 92.4,
+  "description": "...",
+  "symptoms": ["..."],
+  "treatment": ["..."],
+  "prevention": ["..."],
+  "severity": 50.8,
+  "progression": [{"stage": "Early", "timeline": "Days 1-7..."}],
+  "environmentalFactors": { "temperature": "...", "humidity": "...", "sunlight": "...", "watering": "..." },
+  "topPredictions": [{"className": "...", "label": "...", "probability": 92.4}, ...],
+  "leafProbability": 99.3
+}
+```
+
+**2. `status: "not_a_leaf"` — leaf gate rejected**
+
+```json
+{
+  "status": "not_a_leaf",
+  "diseaseName": "Not a leaf",
+  "leafProbability": 12.4,
+  "message": "..."
+}
+```
+
+**3. `status: "out_of_scope"` — confidence/entropy threshold rejected**
+
+```json
+{
+  "status": "out_of_scope",
+  "diseaseName": "Could not confidently identify",
+  "confidence": 38.2,
+  "entropy": 2.91,
+  "message": "..."
+}
+```
+
+The frontend uses `status` to render three distinct UIs.
+
+### `POST /qna`
+
+Body:
+
+```json
+{
+  "disease_name": "Tomato – Early blight",
+  "question": "Are there organic treatment options?",
+  "history": [
+    { "role": "user", "content": "Earlier user question" },
+    { "role": "assistant", "content": "Earlier assistant answer" }
+  ]
+}
+```
+
+Returns `{ "answer": "..." }`. Calls Gemini server-side using `GEMINI_API_KEY`.
+
+---
+
+## Tests
 
 ```bash
 pytest tests/
 ```
+
+The bundled tests are smoke-level — they don't require the `.keras` files to
+exist. Add real-model tests once you've placed the trained artifacts.
+
+---
+
+## Threshold tuning
+
+If the API returns `out_of_scope` too often:
+- Lower `CONFIDENCE_THRESHOLD` (e.g. `0.45`)
+- Raise `ENTROPY_THRESHOLD` (e.g. `3.0`)
+
+If it returns `not_a_leaf` too often on real leaves:
+- Lower `LEAF_THRESHOLD` (e.g. `0.3`)
+
+If it confidently mis-classifies obvious non-leaves:
+- Raise `LEAF_THRESHOLD` (e.g. `0.7`)
+
+The Colab notebook prints a calibrated starting value for `LEAF_THRESHOLD`.
+
+---
+
+## Coverage limitations
+
+The custom model is trained on the PlantVillage "New Plant Diseases" dataset
+which contains **38 classes across 14 plant species**:
+
+> Apple, Blueberry, Cherry, Corn (maize), Grape, Orange, Peach, Bell Pepper,
+> Potato, Raspberry, Soybean, Squash, Strawberry, Tomato.
+
+It **cannot** detect:
+- Plants outside this list (mango, banana, rice, wheat, etc.)
+- Pests other than tomato two-spotted spider mite
+- Nutrient deficiencies (N, P, K, micros)
+- Environmental damage (sunburn, frost, herbicide, drought)
+- Whole-plant or fruit-only conditions from a leaf photo
+
+The leaf gate + confidence threshold + entropy threshold combine to *reject*
+out-of-scope inputs rather than confidently lying. For anything outside the
+supported list, use the **Gemini provider** in the frontend.

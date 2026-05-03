@@ -1,3 +1,15 @@
+"""
+DEPRECATED — kept for offline / no-internet fallback only.
+
+For the actively maintained training workflow, use the Colab notebook at
+`leafdoc-backend/colab/train_on_colab.ipynb`. That notebook trains BOTH the
+disease classifier AND the leaf-vs-not-leaf gate that the FastAPI backend
+needs at inference time. This script only trains the disease classifier and
+will NOT produce the leaf gate.
+
+If you absolutely must train locally, you have been warned: the PlantVillage
+dataset is large and MobileNetV3 training will saturate RAM and CPU.
+"""
 
 import tensorflow as tf
 import os

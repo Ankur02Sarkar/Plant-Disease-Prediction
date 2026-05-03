@@ -16,24 +16,30 @@ import {
   Legend,
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AnalysisResult } from "@/lib/gemini";
+import type { AnalysisResult } from "@/lib/gemini";
 
 interface AnalysisChartsProps {
   data: AnalysisResult;
 }
 
 export function AnalysisCharts({ data }: AnalysisChartsProps) {
+  const severity = data.severity ?? 0;
+  const progression = data.progression ?? [];
+  const env = data.environmentalFactors;
+
   // Transform progression data for LineChart
-  const progressionData = data.progression.map((item, index) => ({
+  const progressionData = progression.map((item, index) => ({
     name: item.timeline,
-    severity: index === 0 ? data.severity * 0.5 : index === 1 ? data.severity : Math.min(100, data.severity * 1.5),
+    severity:
+      index === 0 ? severity * 0.5 : index === 1 ? severity : Math.min(100, severity * 1.5),
     stage: item.stage,
   }));
 
   // Transform environmental data for RadarChart
   // We need to parse the qualitative strings into quantitative values for the chart
   // This is a rough estimation for visualization purposes
-  const getEnvScore = (val: string) => {
+  const getEnvScore = (val?: string) => {
+    if (!val) return 60;
     // Simple heuristic: if it mentions 'high' -> 80, 'low' -> 20, 'medium'/'moderate' -> 50
     const lower = val.toLowerCase();
     if (lower.includes("high")) return 80;
@@ -43,10 +49,10 @@ export function AnalysisCharts({ data }: AnalysisChartsProps) {
   };
 
   const envData = [
-    { subject: "Temperature", A: getEnvScore(data.environmentalFactors.temperature), fullMark: 100 },
-    { subject: "Humidity", A: getEnvScore(data.environmentalFactors.humidity), fullMark: 100 },
-    { subject: "Sunlight", A: getEnvScore(data.environmentalFactors.sunlight), fullMark: 100 },
-    { subject: "Watering", A: getEnvScore(data.environmentalFactors.watering), fullMark: 100 },
+    { subject: "Temperature", A: getEnvScore(env?.temperature), fullMark: 100 },
+    { subject: "Humidity", A: getEnvScore(env?.humidity), fullMark: 100 },
+    { subject: "Sunlight", A: getEnvScore(env?.sunlight), fullMark: 100 },
+    { subject: "Watering", A: getEnvScore(env?.watering), fullMark: 100 },
   ];
 
   if (data.isHealthy) {
