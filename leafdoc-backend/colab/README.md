@@ -128,7 +128,9 @@ If you want to retrain later:
 |---|---|
 | `nvidia-smi` reports no GPU | Runtime → Change runtime type → GPU |
 | "Disconnected" mid-training | Colab session timed out. Re-run from section 5; checkpoints in Drive are intact |
-| Out-of-memory during training | Lower `BATCH_SIZE` from 32 to 16 in section 5 |
+| Kernel keeps restarting / "could not allocate pinned host of size" warnings in logs | Host RAM OOM (Colab free tier ~12 GB). The notebook already keeps the pipeline lean (no `.shuffle()` buffer, `.prefetch(buffer_size=2)`, no `val_ds.cache()`). If it still OOMs, lower `BATCH_SIZE` from 32 to 16 in section 5, then `Runtime → Restart session` and re-run |
+| `RandomFlip` / `RandomRotation` error: `module 'keras' has no attribute 'KerasTensor'` | TF 2.20 + Keras 3.13 bug. Already worked around in this notebook by moving augmentation into the `tf.data` pipeline. If you still hit it, make sure you re-ran the dataset-prep cell after pulling latest |
+| Out-of-memory during training | Lower `BATCH_SIZE` from 32 to 16 in section 5; restart the runtime |
 | Kaggle download fails with 403 | Re-create your `kaggle.json` token; ensure you accepted the dataset's competition rules on its Kaggle page |
 | Locally `tf.keras.models.load_model` fails | Your local TF version doesn't match Colab's. Pin it in `requirements.txt` exactly as printed in notebook section 1 |
 | Final accuracy is poor (<80%) | Run more epochs, or unfreeze deeper layers in stage 2 (`FINETUNE_UNFREEZE_FROM = -60`) |
