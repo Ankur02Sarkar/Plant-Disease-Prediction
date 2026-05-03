@@ -38,5 +38,6 @@ temp/
 __pycache__/
 .pytest_cache/
 .venv/
+research/output
 
 kaggle-model
