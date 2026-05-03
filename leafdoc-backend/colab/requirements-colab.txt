@@ -14,3 +14,4 @@ numpy
 pillow
 scikit-learn
 matplotlib
+tensorflow-datasets
