@@ -35,4 +35,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 temp/
 
+__pycache__/
+.pytest_cache/
+.venv/
+
 kaggle-model
