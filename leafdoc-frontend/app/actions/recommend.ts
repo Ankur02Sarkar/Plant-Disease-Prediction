@@ -4,7 +4,7 @@ import { OpenAI } from "openai";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
-const OPENROUTER_TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL ?? "meta-llama/llama-3.3-70b-instruct:free";
+const OPENROUTER_TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL ?? "nvidia/nemotron-3-super-120b-a12b:free";
 
 const client = new OpenAI({
   apiKey: OPENROUTER_API_KEY,

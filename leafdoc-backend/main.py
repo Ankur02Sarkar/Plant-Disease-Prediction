@@ -62,7 +62,7 @@ ENTROPY_THRESHOLD = float(os.getenv("ENTROPY_THRESHOLD", "2.5"))  # max possible
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_TEXT_MODEL = os.getenv(
-    "OPENROUTER_TEXT_MODEL", "meta-llama/llama-3.3-70b-instruct:free"
+    "OPENROUTER_TEXT_MODEL", "nvidia/nemotron-3-super-120b-a12b:free"
 )
 
 IMG_SIZE = (224, 224)

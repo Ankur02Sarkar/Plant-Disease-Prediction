@@ -88,7 +88,7 @@ ALLOWED_ORIGINS=*
 # OpenRouter (free tier) – get your key at https://openrouter.ai/keys
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_TEXT_MODEL=meta-llama/llama-3.3-70b-instruct:free
+OPENROUTER_TEXT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 ```
 
 ---
