@@ -49,7 +49,7 @@ MODEL_PATH = os.getenv("MODEL_PATH", "models/plant_disease_model.keras")
 LEAF_CLASSIFIER_PATH = os.getenv("LEAF_CLASSIFIER_PATH", "models/leaf_classifier.keras")
 CLASS_INDICES_PATH = os.getenv("CLASS_INDICES_PATH", "models/class_indices.json")
 DISEASE_INFO_PATH = os.getenv("DISEASE_INFO_PATH", "models/disease_info.json")
-
+PORT = int(os.getenv("PORT", "8000"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
 # Thresholds (tunable via .env). The Colab notebook prints a calibrated value
@@ -439,4 +439,4 @@ async def qna(req: QnaRequest) -> Dict[str, Any]:
 # ----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)
