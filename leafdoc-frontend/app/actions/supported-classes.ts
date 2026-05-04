@@ -2,7 +2,7 @@
 
 // SSR-only server action — fetches the supported-class list from FastAPI.
 
-import type { SupportedClasses } from "@/lib/gemini";
+import type { SupportedClasses } from "@/lib/types";
 
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://localhost:8000";
 

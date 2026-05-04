@@ -1,10 +1,10 @@
 # LeafDoc — Plant Disease Prediction
 
 Identify plant diseases from a leaf photo using either:
-- **Gemini AI** — open-ended, recognizes most plants/conditions
+- **OpenRouter (free AI)** — open-ended, recognizes most plants/conditions
 - **Custom MobileNetV3 classifier** — trained on Google Colab, served locally via FastAPI; covers 38 classes across 14 plant species, with a leaf-vs-not-leaf gate to reject obviously out-of-scope images
 
-Plus a Gemini-backed **Q&A chatbot** for follow-up questions about whatever disease was detected.
+Plus an OpenRouter-backed **Q&A chatbot** for follow-up questions about whatever disease was detected.
 
 ---
 
@@ -15,9 +15,9 @@ Plus a Gemini-backed **Q&A chatbot** for follow-up questions about whatever dise
 │                                                                    │
 │   ┌──────────────────────┐                                         │
 │   │  Provider toggle     │                                         │
-│   │  ── Gemini ──────────┼──►  Server Action (SSR)                 │
+│   │  ── OpenRouter ──────┼──►  Server Action (SSR)                 │
 │   │                      │       │                                 │
-│   │                      │       └──►  Gemini API (server-side)    │
+│   │                      │       └──►  OpenRouter API (server-side)│
 │   │                      │                                         │
 │   │  ── Custom Model ────┼──►  Server Action (SSR)                 │
 │   │                      │       │                                 │
@@ -30,14 +30,14 @@ Plus a Gemini-backed **Q&A chatbot** for follow-up questions about whatever dise
 │   │                      │                                         │
 │   │                      ├──►  Server Action (SSR)                 │
 │   │                      │       │                                 │
-│   │                      │       └──►  FastAPI /qna ─► Gemini      │
+│   │                      │       └──►  FastAPI /qna ─► OpenRouter  │
 │   └──────────────────────┘                                         │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-**SSR posture:** every Gemini API call and every backend URL reference is
+**SSR posture:** every OpenRouter API call and every backend URL reference is
 confined to Next.js Server Actions (`"use server"`). The browser never sees
-the Gemini key or the backend URL.
+the OpenRouter key or the backend URL.
 
 ---
 
@@ -65,7 +65,7 @@ the Gemini key or the backend URL.
 ├── leafdoc-frontend/             Next.js app
 │   ├── app/
 │   │   ├── actions/              Server Actions (SSR boundary)
-│   │   │   ├── analyze.ts          provider router (Gemini | Custom)
+│   │   │   ├── analyze.ts          provider router (OpenRouter | Custom)
 │   │   │   ├── qna.ts              proxies to FastAPI /qna
 │   │   │   ├── health.ts           proxies to FastAPI /health
 │   │   │   ├── supported-classes.ts proxies to FastAPI /supported-classes
@@ -73,12 +73,12 @@ the Gemini key or the backend URL.
 │   │   ├── page.tsx              main page (provider toggle + upload)
 │   │   └── recommendations/      existing crop-recommendations page
 │   ├── components/
-│   │   ├── provider-toggle.tsx   Gemini ↔ Custom Model
+│   │   ├── provider-toggle.tsx   OpenRouter ↔ Custom Model
 │   │   ├── disease-chat.tsx      follow-up Q&A chat
 │   │   ├── supported-classes-info.tsx   coverage info dialog
 │   │   ├── analysis-result.tsx   3-state result UI (ok/not_a_leaf/out_of_scope)
 │   │   └── …
-│   ├── lib/gemini.ts             shared TYPES only (no SDK calls here)
+│   ├── lib/types.ts             shared TYPES only (no SDK calls here)
 │   └── .env.local                placeholders by default
 │
 └── README.md                     (this file)
@@ -90,20 +90,20 @@ the Gemini key or the backend URL.
 
 You have two paths depending on whether you want to use the custom local model.
 
-### Path A — Demo with Gemini only (no Colab, no backend)
+### Path A — Demo with OpenRouter only (no Colab, no backend)
 
 1. **Install Bun** (or use npm/yarn/pnpm).
 2. ```bash
    cd leafdoc-frontend
    bun install
    ```
-3. Edit `leafdoc-frontend/.env.local` — replace `your_gemini_api_key_here` with a real key from <https://aistudio.google.com/>.
+3. Edit `leafdoc-frontend/.env.local` — replace `your_openrouter_api_key_here` with a real key from <https://openrouter.ai/keys> (free tier works).
 4. ```bash
    bun dev
    ```
-5. Open <http://localhost:3000> → keep the **Gemini AI** toggle selected → upload a leaf photo.
+5. Open <http://localhost:3000> → keep the **OpenRouter** toggle selected → upload a leaf photo.
 
-The custom-model toggle will show "Backend unreachable" — that's expected without the backend. The Q&A chat below the result also requires the backend (since Q&A is proxied through FastAPI), so for a pure Gemini-only demo the chat won't work.
+The custom-model toggle will show "Backend unreachable" — that's expected without the backend. The Q&A chat below the result also requires the backend (since Q&A is proxied through FastAPI), so for a pure OpenRouter-only demo the chat won't work.
 
 ### Path B — Full setup with the custom model
 
@@ -117,7 +117,7 @@ The custom-model toggle will show "Backend unreachable" — that's expected with
    pip install -r requirements.txt
    ```
    Pin `tensorflow==<version>` in `requirements.txt` to whatever version the Colab notebook printed in section 1.
-4. Edit `leafdoc-backend/.env` — replace `your_gemini_api_key_here` with your Gemini key (used for the `/qna` chatbot). Also update `LEAF_THRESHOLD` to the value the notebook suggested in section 10.
+4. Edit `leafdoc-backend/.env` — replace `your_openrouter_api_key_here` with your OpenRouter key (used for the `/qna` chatbot). Also update `LEAF_THRESHOLD` to the value the notebook suggested in section 10.
 5. ```bash
    uvicorn main:app --reload
    ```
@@ -126,11 +126,11 @@ The custom-model toggle will show "Backend unreachable" — that's expected with
    cd ../leafdoc-frontend
    bun install
    ```
-   Edit `leafdoc-frontend/.env.local` — set `GEMINI_API_KEY` (only needed if you also want to use the Gemini provider toggle) and confirm `BACKEND_API_URL=http://localhost:8000`.
+   Edit `leafdoc-frontend/.env.local` — set `OPENROUTER_API_KEY` (only needed if you also want to use the OpenRouter provider toggle) and confirm `BACKEND_API_URL=http://localhost:8000`.
 7. ```bash
    bun dev
    ```
-8. Open <http://localhost:3000>. Toggle **Custom Model** → upload a leaf → see the rich result + chat with Gemini about it.
+8. Open <http://localhost:3000>. Toggle **Custom Model** → upload a leaf → see the rich result + chat with OpenRouter about it.
 
 ---
 
@@ -138,8 +138,8 @@ The custom-model toggle will show "Backend unreachable" — that's expected with
 
 | Toggle | Image classification | Q&A chat |
 |---|---|---|
-| Gemini AI | Server Action → Gemini API directly | Server Action → FastAPI `/qna` → Gemini |
-| Custom Model | Server Action → FastAPI `/predict` (leaf gate + 38-class classifier) | Server Action → FastAPI `/qna` → Gemini |
+| OpenRouter | Server Action → OpenRouter API directly | Server Action → FastAPI `/qna` → OpenRouter |
+| Custom Model | Server Action → FastAPI `/predict` (leaf gate + 38-class classifier) | Server Action → FastAPI `/qna` → OpenRouter |
 
 The chat is always backend-routed — the frontend never calls Gemini directly for chat.
 
@@ -166,7 +166,7 @@ To prevent confidently-wrong predictions, the backend applies three rejection la
 2. **Confidence threshold** — `out_of_scope` if top class confidence < `CONFIDENCE_THRESHOLD` (default 0.60)
 3. **Entropy threshold** — `out_of_scope` if predictions are spread too uniformly (default 2.5; max ≈ 3.64)
 
-The frontend renders distinct UIs for each case and offers a one-click **"Re-analyze with Gemini"** button.
+The frontend renders distinct UIs for each case and offers a one-click **"Re-analyze with OpenRouter"** button.
 
 The full coverage list and limitations are also exposed at:
 - Frontend → click "What can the custom model detect?" beside the toggle
@@ -185,7 +185,7 @@ Edit `leafdoc-backend/.env`:
 | `ENTROPY_THRESHOLD` | `2.5` | Above this, `out_of_scope` |
 
 Lower thresholds → fewer rejections, more risk of confidently wrong predictions.
-Higher thresholds → more rejections, safer but more "use Gemini instead" prompts.
+Higher thresholds → more rejections, safer but more "use OpenRouter instead" prompts.
 
 ---
 
@@ -208,7 +208,7 @@ Smoke tests only — they don't require the trained `.keras` files.
 | Frontend shows "Backend unreachable" for Custom Model | Run `uvicorn main:app --reload` in `leafdoc-backend` |
 | `/predict` returns 503 "Disease model not loaded" | The `.keras` files aren't in `leafdoc-backend/models/`. Train on Colab and drop them in |
 | `tf.keras.models.load_model` errors locally | Your local TF version doesn't match Colab's. Pin it in `requirements.txt` to the version the notebook printed |
-| Q&A chat fails with "GEMINI_API_KEY is not configured" | Set `GEMINI_API_KEY` in `leafdoc-backend/.env` |
+| Q&A chat fails with "OPENROUTER_API_KEY is not configured" | Set `OPENROUTER_API_KEY` in `leafdoc-backend/.env` |
 | Custom model rejects everything as `out_of_scope` | Lower `CONFIDENCE_THRESHOLD` (e.g. `0.45`) or raise `ENTROPY_THRESHOLD` (e.g. `3.0`) |
 | Custom model rejects real leaves as `not_a_leaf` | Lower `LEAF_THRESHOLD` (e.g. `0.3`) |
 | Colab session disconnects mid-training | The `ModelCheckpoint` saved the best weights to Drive. Re-run from where you stopped |
@@ -230,6 +230,6 @@ If you already have a `.keras` file (from a colleague or a previous training run
 ## Security notes
 
 - Both `.env` files contain placeholders — replace them before deploying anywhere.
-- All Gemini calls and the backend URL are kept off the client by routing through Next.js Server Actions.
+- All OpenRouter calls and the backend URL are kept off the client by routing through Next.js Server Actions.
 - CORS is currently `*`. Tighten it (`ALLOWED_ORIGINS=http://localhost:3000`) if you expose the backend publicly.
-- The Gemini API key in `leafdoc-frontend/.env.local` is used by the Gemini provider's image-analysis path (server-side). The Q&A chat uses the backend's separate `GEMINI_API_KEY`.
+- The OpenRouter API key in `leafdoc-frontend/.env.local` is used by the OpenRouter provider's image-analysis path (server-side). The Q&A chat uses the backend's separate `OPENROUTER_API_KEY`.

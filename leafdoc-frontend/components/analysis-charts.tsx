@@ -16,7 +16,7 @@ import {
   Legend,
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { AnalysisResult } from "@/lib/gemini";
+import type { AnalysisResult } from "@/lib/types";
 
 interface AnalysisChartsProps {
   data: AnalysisResult;

@@ -12,5 +12,5 @@ scikit-learn
 pytest
 httpx
 python-dotenv
-google-genai
+openai
 pydantic

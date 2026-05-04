@@ -2,7 +2,7 @@
 
 // SSR-only server action. Keeps the BACKEND_API_URL off the client.
 
-import type { BackendHealth } from "@/lib/gemini";
+import type { BackendHealth } from "@/lib/types";
 
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://localhost:8000";
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { AnalysisProvider, BackendHealth } from "@/lib/gemini";
+import type { AnalysisProvider, BackendHealth } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Sparkles, Cpu, RefreshCw } from "lucide-react";
@@ -43,21 +43,21 @@ export function ProviderToggle({ provider, onChange, disabled }: Props) {
         <button
           type="button"
           disabled={disabled}
-          onClick={() => onChange("gemini")}
+          onClick={() => onChange("openrouter")}
           className={cn(
             "flex flex-col items-start gap-1 rounded-md border p-3 text-left transition-colors",
             "hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed",
-            provider === "gemini"
+            provider === "openrouter"
               ? "border-primary bg-primary/5"
               : "border-border"
           )}
         >
           <div className="flex items-center gap-2 font-medium">
             <Sparkles className="h-4 w-4" />
-            Gemini AI
+            OpenRouter
           </div>
           <div className="text-xs text-muted-foreground">
-            Open-ended. Recognizes most plants & conditions.
+            Free AI. Recognizes most plants & conditions.
           </div>
         </button>
 

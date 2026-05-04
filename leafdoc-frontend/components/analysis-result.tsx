@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnalysisResult } from "@/lib/gemini";
+import type { AnalysisResult } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -30,15 +30,15 @@ import { DiseaseChat } from "./disease-chat";
 
 interface Props {
   result: AnalysisResult;
-  onSwitchToGemini?: () => void;
+  onSwitchToOpenRouter?: () => void;
 }
 
-export function AnalysisResultDisplay({ result, onSwitchToGemini }: Props) {
+export function AnalysisResultDisplay({ result, onSwitchToOpenRouter }: Props) {
   if (result.status === "not_a_leaf") {
-    return <NotALeafCard result={result} onSwitchToGemini={onSwitchToGemini} />;
+    return <NotALeafCard result={result} onSwitchToOpenRouter={onSwitchToOpenRouter} />;
   }
   if (result.status === "out_of_scope") {
-    return <OutOfScopeCard result={result} onSwitchToGemini={onSwitchToGemini} />;
+    return <OutOfScopeCard result={result} onSwitchToOpenRouter={onSwitchToOpenRouter} />;
   }
   return <SuccessResult result={result} />;
 }
@@ -49,10 +49,10 @@ export function AnalysisResultDisplay({ result, onSwitchToGemini }: Props) {
 
 function NotALeafCard({
   result,
-  onSwitchToGemini,
+  onSwitchToOpenRouter,
 }: {
   result: AnalysisResult;
-  onSwitchToGemini?: () => void;
+  onSwitchToOpenRouter?: () => void;
 }) {
   return (
     <Card className="border-l-4 border-l-orange-500 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -70,10 +70,10 @@ function NotALeafCard({
             Leaf probability: <span className="font-medium">{result.leafProbability}%</span>
           </div>
         )}
-        {onSwitchToGemini && (
-          <Button onClick={onSwitchToGemini} variant="default" className="gap-2">
+        {onSwitchToOpenRouter && (
+          <Button onClick={onSwitchToOpenRouter} variant="default" className="gap-2">
             <Sparkles className="h-4 w-4" />
-            Re-analyze with Gemini
+            Re-analyze with OpenRouter
           </Button>
         )}
       </CardContent>
@@ -87,10 +87,10 @@ function NotALeafCard({
 
 function OutOfScopeCard({
   result,
-  onSwitchToGemini,
+  onSwitchToOpenRouter,
 }: {
   result: AnalysisResult;
-  onSwitchToGemini?: () => void;
+  onSwitchToOpenRouter?: () => void;
 }) {
   return (
     <Card className="border-l-4 border-l-yellow-500 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -135,10 +135,10 @@ function OutOfScopeCard({
           </div>
         )}
 
-        {onSwitchToGemini && (
-          <Button onClick={onSwitchToGemini} variant="default" className="gap-2">
+        {onSwitchToOpenRouter && (
+          <Button onClick={onSwitchToOpenRouter} variant="default" className="gap-2">
             <Sparkles className="h-4 w-4" />
-            Re-analyze with Gemini
+            Re-analyze with OpenRouter
           </Button>
         )}
       </CardContent>
@@ -173,9 +173,9 @@ function SuccessResult({ result }: { result: AnalysisResult }) {
               <CardDescription className="flex items-center gap-3 flex-wrap">
                 <span>Confidence: {result.confidence}%</span>
                 <Badge variant="outline" className="gap-1 text-[10px] font-normal">
-                  {result.provider === "gemini" ? (
+                  {result.provider === "openrouter" ? (
                     <>
-                      <Sparkles className="h-3 w-3" /> Gemini AI
+                      <Sparkles className="h-3 w-3" /> OpenRouter
                     </>
                   ) : (
                     <>
@@ -299,7 +299,7 @@ function SuccessResult({ result }: { result: AnalysisResult }) {
         </TabsContent>
       </Tabs>
 
-      {/* Q&A is available regardless of provider — backend always handles Gemini calls. */}
+      {/* Q&A is available regardless of provider — backend always handles OpenRouter calls. */}
       {!result.isHealthy && <DiseaseChat diseaseName={result.diseaseName} />}
     </div>
   );

@@ -2,11 +2,11 @@
 
 // =============================================================================
 // SSR-only Server Action. Forwards Q&A questions to the FastAPI backend, which
-// in turn calls Gemini server-side. The browser only sees this action's
-// {success, answer} response — never the backend URL or the Gemini key.
+// in turn calls OpenRouter server-side. The browser only sees this action's
+// {success, answer} response — never the backend URL or the OpenRouter key.
 // =============================================================================
 
-import type { ChatMessage } from "@/lib/gemini";
+import type { ChatMessage } from "@/lib/types";
 
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://localhost:8000";
 

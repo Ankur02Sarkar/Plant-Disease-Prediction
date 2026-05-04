@@ -110,12 +110,12 @@ def test_qna_validation_missing_fields(client: TestClient) -> None:
     assert res.status_code == 422
 
 
-def test_qna_without_gemini_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(main, "GEMINI_API_KEY", "")
+def test_qna_without_openrouter_key(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main, "OPENROUTER_API_KEY", "")
     payload: Dict[str, Any] = {
         "disease_name": "Tomato – Early blight",
         "question": "How do I treat this organically?",
     }
     res = client.post("/qna", json=payload)
     assert res.status_code == 503
-    assert "GEMINI_API_KEY" in res.json()["detail"]
+    assert "OPENROUTER_API_KEY" in res.json()["detail"]

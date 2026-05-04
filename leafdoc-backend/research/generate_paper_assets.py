@@ -316,7 +316,7 @@ def page_abstract(pdf: PdfPages, page: int, total: int) -> None:
         "accuracy at a calibrated decision threshold of 0.05. Three rejection layers — leaf gate, "
         "softmax confidence threshold, and predictive entropy — combine to surface either a rich "
         "diagnosis, a not-a-leaf rejection, or an out-of-scope rejection. The system is exposed "
-        "via a FastAPI backend with a Gemini-backed Q&A endpoint for follow-up questions about "
+        "via a FastAPI backend with an OpenRouter-backed Q&A endpoint for follow-up questions about "
         "the detected disease."
     )
 
@@ -334,7 +334,7 @@ def page_abstract(pdf: PdfPages, page: int, total: int) -> None:
         "3.  Three-state inference protocol with leaf-gate, confidence, and entropy rejection "
         "layers, surfacing distinct UI states for not-a-leaf and out-of-scope inputs.",
         "4.  End-to-end open-source system: training notebook, FastAPI backend, Next.js frontend "
-        "with provider toggle (custom model vs. Gemini), and Gemini-backed Q&A chatbot.",
+        "with provider toggle (custom model vs. OpenRouter), and OpenRouter-backed Q&A chatbot.",
     ]
     y = 0.38
     for c in contributions:
@@ -1092,7 +1092,7 @@ def page_references(pdf: PdfPages, page: int, total: int) -> None:
         "[7] Chollet, F., et al. \"Keras 3.\" 2015–2026. https://keras.io/",
         "[8] FastAPI. https://fastapi.tiangolo.com/",
         "[9] Microsoft. \"ONNX Runtime.\" https://onnxruntime.ai/",
-        "[10] Google. \"Gemini API.\" https://ai.google.dev/",
+        "[10] OpenRouter. \"OpenRouter.\" https://openrouter.ai/",
     ]
     y = 0.86
     for ref in refs:
@@ -1154,12 +1154,12 @@ def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
         color=COLORS["highlight"])
     arrow(3.5, 12.05, 4.5, 12.05, label="HTTPS")
 
-    # Three branches: Gemini direct, FastAPI predict, FastAPI qna
-    box(4.5, 9.4, 2.2, 1.0, "Gemini API\n(image analysis)", color="#7570b3")
+    # Three branches: OpenRouter direct, FastAPI predict, FastAPI qna
+    box(4.5, 9.4, 2.2, 1.0, "OpenRouter\n(image analysis)", color="#7570b3")
     box(7.0, 9.4, 2.2, 1.0, "FastAPI\n/predict", color="#d95f02")
     box(9.5, 9.4, 2.0, 1.0, "FastAPI\n/qna", color="#d95f02")
 
-    arrow(5.6, 11.6, 5.6, 10.4, label='provider="gemini"')
+    arrow(5.6, 11.6, 5.6, 10.4, label='provider="openrouter"')
     arrow(8.1, 11.6, 8.1, 10.4, label='provider="custom"')
     arrow(10.5, 11.6, 10.5, 10.4, label="ask")
 
@@ -1173,8 +1173,8 @@ def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
     box(6.0, 5.6, 4.5, 0.9, "disease_info.json  (38 entries)", color="#bcbcbc", textcolor="#222")
     arrow(8.25, 7.4, 8.25, 6.5)
 
-    # Gemini for /qna
-    box(7.4, 3.8, 3.5, 0.9, "Gemini API\n(server-side, /qna only)", color="#7570b3")
+    # OpenRouter for /qna
+    box(7.4, 3.8, 3.5, 0.9, "OpenRouter\n(server-side, /qna only)", color="#7570b3")
     arrow(9.0, 7.4, 9.0, 4.7, dashed=True)
 
     # Result & UI
@@ -1182,7 +1182,7 @@ def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
         color="#d8efd8", textcolor="#222")
     arrow(6.0, 6.05, 4.5, 6.2)
 
-    box(0.5, 3.0, 4.0, 1.5, "Frontend renders:\n• Diagnosis (rich)\n• Re-analyze with Gemini",
+    box(0.5, 3.0, 4.0, 1.5, "Frontend renders:\n• Diagnosis (rich)\n• Re-analyze with OpenRouter",
         color=COLORS["neutral"])
     arrow(2.5, 5.6, 2.5, 4.5)
 
@@ -1193,8 +1193,8 @@ def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
 
     # Caption
     ax.text(0.5, 0.2,
-            "Both Gemini calls (image-analysis fallback and disease Q&A) execute server-side. "
-            "The browser never holds the Gemini API key or the backend URL.",
+            "Both OpenRouter calls (image-analysis fallback and disease Q&A) execute server-side. "
+            "The browser never holds the OpenRouter API key or the backend URL.",
             fontsize=9, style="italic", color="#333")
 
     _save_page(fig, pdf, "17_end_to_end_system.png")

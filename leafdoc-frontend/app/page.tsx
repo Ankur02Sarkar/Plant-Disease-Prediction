@@ -6,7 +6,7 @@ import { AnalysisResultDisplay } from "@/components/analysis-result";
 import { ComparisonView } from "@/components/comparison-view";
 import { ProviderToggle } from "@/components/provider-toggle";
 import { SupportedClassesInfo } from "@/components/supported-classes-info";
-import type { AnalysisProvider, AnalysisResult } from "@/lib/gemini";
+import type { AnalysisProvider, AnalysisResult } from "@/lib/types";
 import { analyzeImageAction } from "@/app/actions/analyze";
 import { History, Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ function reducer(state: State, action: Action): State {
 
 export default function Home() {
   const [state, dispatch] = useReducer(reducer, { status: "IDLE" });
-  const [provider, setProvider] = useState<AnalysisProvider>("gemini");
+  const [provider, setProvider] = useState<AnalysisProvider>("openrouter");
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [history, setHistory] = useState<AnalysisResult[]>([]);
   const [comparisonList, setComparisonList] = useState<AnalysisResult[]>([]);
@@ -79,10 +79,10 @@ export default function Home() {
     void runAnalysis(file, provider);
   };
 
-  const handleSwitchToGemini = () => {
+  const handleSwitchToOpenRouter = () => {
     if (!lastFile) return;
-    setProvider("gemini");
-    void runAnalysis(lastFile, "gemini");
+    setProvider("openrouter");
+    void runAnalysis(lastFile, "openrouter");
   };
 
   const handleReset = () => {
@@ -145,7 +145,7 @@ export default function Home() {
                             {item.description}
                           </p>
                           <p className="text-[10px] text-muted-foreground">
-                            via {item.provider === "gemini" ? "Gemini AI" : "Custom Model"}
+                            via {item.provider === "openrouter" ? "OpenRouter" : "Custom Model"}
                           </p>
                         </CardContent>
                       </Card>
@@ -162,7 +162,7 @@ export default function Home() {
             <h1 className="text-3xl font-bold sm:text-4xl md:text-5xl">Plant Disease Detector</h1>
             <p className="text-muted-foreground max-w-[700px] mx-auto text-lg">
               Identify plant diseases instantly with AI-powered analysis. Choose between
-              open-ended Gemini analysis or a locally-served custom MobileNetV3 classifier.
+              open-ended OpenRouter analysis or a locally-served custom MobileNetV3 classifier.
             </p>
           </div>
 
@@ -191,7 +191,7 @@ export default function Home() {
                   <div className="flex flex-col items-center justify-center space-y-4 animate-in fade-in zoom-in duration-300">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     <p className="text-muted-foreground animate-pulse">
-                      Analyzing plant health via {provider === "gemini" ? "Gemini" : "Custom Model"}…
+                      Analyzing plant health via {provider === "openrouter" ? "OpenRouter" : "Custom Model"}…
                     </p>
                   </div>
                 )}
@@ -231,9 +231,9 @@ export default function Home() {
                   />
                 )}
 
-                <AnalysisResultDisplay
+<AnalysisResultDisplay
                   result={state.result}
-                  onSwitchToGemini={lastFile ? handleSwitchToGemini : undefined}
+                  onSwitchToOpenRouter={lastFile ? handleSwitchToOpenRouter : undefined}
                 />
               </div>
             )}
@@ -244,7 +244,7 @@ export default function Home() {
       <footer className="border-t py-6 md:py-0">
         <div className="container flex flex-col items-center justify-between gap-4 md:h-24 md:flex-row mx-auto px-4">
           <p className="text-center text-sm leading-loose text-muted-foreground md:text-left">
-            Built with Next.js, shadcn/ui, FastAPI, and Gemini AI.
+            Built with Next.js, shadcn/ui, FastAPI, and OpenRouter (free AI).
           </p>
         </div>
       </footer>

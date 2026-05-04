@@ -1,10 +1,19 @@
 "use server";
 
-import { GoogleGenAI } from "@google/genai";
+import { OpenAI } from "openai";
 
-const apiKey =
-  process.env.GEMINI_API_KEY;
-const client = new GoogleGenAI({ apiKey });
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
+const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
+const OPENROUTER_TEXT_MODEL = process.env.OPENROUTER_TEXT_MODEL ?? "meta-llama/llama-3.3-70b-instruct:free";
+
+const client = new OpenAI({
+  apiKey: OPENROUTER_API_KEY,
+  baseURL: OPENROUTER_BASE_URL,
+  defaultHeaders: {
+    "HTTP-Referer": "http://localhost:3000",
+    "X-Title": "LeafDoc-Frontend",
+  },
+});
 
 export interface RecommendationResult {
   crops: {
@@ -23,12 +32,19 @@ export async function getRecommendationsAction(
   location: string,
   weather: any
 ): Promise<{ success: boolean; data?: RecommendationResult; error?: string }> {
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your_openrouter_api_key_here") {
+    return {
+      success: false,
+      error: "OPENROUTER_API_KEY is not configured in the frontend .env.local.",
+    };
+  }
+
   const prompt = `
     Based on the location "${location}" and the following weather conditions: ${JSON.stringify(
     weather
   )},
     recommend suitable crops/plants to grow.
-    
+
     Return ONLY a JSON object with this valid structure:
     {
       "crops": [
@@ -47,29 +63,20 @@ export async function getRecommendationsAction(
   `;
 
   try {
-    const response = await client.models.generateContent({
-      model: "gemini-2.0-flash-lite",
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: prompt }],
-        },
-      ],
-      config: {
-        responseMimeType: "application/json",
-      },
+    const response = await client.chat.completions.create({
+      model: OPENROUTER_TEXT_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
     });
 
-    const text =
-      typeof response.text === "string"
-        ? response.text
-        : JSON.stringify(response);
+    const text = response.choices[0]?.message?.content ?? "";
     const cleanText = text.replace(/```json\n|\n```/g, "").trim();
     const data = JSON.parse(cleanText) as RecommendationResult;
 
     return { success: true, data };
   } catch (error) {
-    console.error("Gemini Recommendation Failed:", error);
+    console.error("OpenRouter Recommendation Failed:", error);
     return { success: false, error: "Failed to generate recommendations." };
   }
 }

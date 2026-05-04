@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageCircle, Send, Loader2, Bot, User } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ChatMessage } from "@/lib/gemini";
+import type { ChatMessage } from "@/lib/types";
 import { askAboutDiseaseAction } from "@/app/actions/qna";
 
 interface Props {
@@ -158,7 +158,7 @@ export function DiseaseChat({ diseaseName }: Props) {
           </Button>
         </form>
         <p className="text-[10px] text-muted-foreground">
-          Powered by Gemini via the FastAPI backend. Answers are AI-generated and may be incorrect — for serious cases consult a local expert.
+          Powered by OpenRouter via the FastAPI backend. Answers are AI-generated and may be incorrect — for serious cases consult a local expert.
         </p>
       </CardContent>
     </Card>

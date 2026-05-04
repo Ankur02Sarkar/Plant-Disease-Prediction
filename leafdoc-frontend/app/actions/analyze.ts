@@ -2,15 +2,17 @@
 
 // =============================================================================
 // SSR-only. This file runs exclusively on the Next.js server.
-// - GEMINI_API_KEY and BACKEND_API_URL are read from server-side env vars.
+// - OPENROUTER_API_KEY and BACKEND_API_URL are read from server-side env vars.
 // - The browser never imports this file (Server Action boundary enforces it).
 // - DO NOT import this file from any client component.
 // =============================================================================
 
-import { GoogleGenAI } from "@google/genai";
-import type { AnalysisProvider, AnalysisResult } from "@/lib/gemini";
+import { OpenAI } from "openai";
+import type { AnalysisProvider, AnalysisResult } from "@/lib/types";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
+const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
+const OPENROUTER_VISION_MODEL = process.env.OPENROUTER_VISION_MODEL ?? "qwen/qwen2.5-vl-72b-instruct:free";
 const BACKEND_API_URL = process.env.BACKEND_API_URL ?? "http://localhost:8000";
 
 type ActionResponse =
@@ -19,7 +21,7 @@ type ActionResponse =
 
 export async function analyzeImageAction(formData: FormData): Promise<ActionResponse> {
   const file = formData.get("file");
-  const provider = (formData.get("provider") as AnalysisProvider | null) ?? "gemini";
+  const provider = (formData.get("provider") as AnalysisProvider | null) ?? "openrouter";
 
   if (!file || !(file instanceof File)) {
     return { success: false, error: "No file provided." };
@@ -28,7 +30,7 @@ export async function analyzeImageAction(formData: FormData): Promise<ActionResp
   if (provider === "custom") {
     return analyzeWithCustomBackend(file);
   }
-  return analyzeWithGemini(file);
+  return analyzeWithOpenRouter(file);
 }
 
 // -----------------------------------------------------------------------------
@@ -52,7 +54,7 @@ async function analyzeWithCustomBackend(file: File): Promise<ActionResponse> {
       success: false,
       error:
         "Could not reach the custom-model backend. Is the FastAPI server running on " +
-        `${BACKEND_API_URL}? Try the Gemini provider instead.`,
+        `${BACKEND_API_URL}? Try the OpenRouter provider instead.`,
     };
   }
 
@@ -75,15 +77,15 @@ async function analyzeWithCustomBackend(file: File): Promise<ActionResponse> {
 }
 
 // -----------------------------------------------------------------------------
-// Gemini direct (server-side only — SDK is never bundled into the client)
+// OpenRouter vision (server-side only — SDK is never bundled into the client)
 // -----------------------------------------------------------------------------
 
-async function analyzeWithGemini(file: File): Promise<ActionResponse> {
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === "your_gemini_api_key_here") {
+async function analyzeWithOpenRouter(file: File): Promise<ActionResponse> {
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === "your_openrouter_api_key_here") {
     return {
       success: false,
       error:
-        "GEMINI_API_KEY is not configured in the frontend .env.local. " +
+        "OPENROUTER_API_KEY is not configured in the frontend .env.local. " +
         "Either set it or use the Custom Model provider.",
     };
   }
@@ -92,7 +94,14 @@ async function analyzeWithGemini(file: File): Promise<ActionResponse> {
     const arrayBuffer = await file.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
 
-    const client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const client = new OpenAI({
+      apiKey: OPENROUTER_API_KEY,
+      baseURL: OPENROUTER_BASE_URL,
+      defaultHeaders: {
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "LeafDoc-Frontend",
+      },
+    });
 
     const prompt = `
       Analyze this plant image for diseases.
@@ -120,33 +129,39 @@ async function analyzeWithGemini(file: File): Promise<ActionResponse> {
       }
     `;
 
-    const response = await client.models.generateContent({
-      model: "gemini-2.0-flash-lite",
-      contents: [
+    const response = await client.chat.completions.create({
+      model: OPENROUTER_VISION_MODEL,
+      messages: [
         {
           role: "user",
-          parts: [
-            { text: prompt },
-            { inlineData: { data: base64, mimeType: file.type || "image/jpeg" } },
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${file.type || "image/jpeg"};base64,${base64}`,
+                detail: "high",
+              },
+            },
           ],
         },
       ],
-      config: { responseMimeType: "application/json" },
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
     });
 
-    const text =
-      typeof response.text === "string" ? response.text : JSON.stringify(response);
+    const text = response.choices[0]?.message?.content ?? "";
     const cleaned = text.replace(/```json\n|\n```/g, "").trim();
     const parsed = JSON.parse(cleaned) as Omit<AnalysisResult, "status" | "provider">;
 
     const data: AnalysisResult = {
       ...parsed,
       status: "ok",
-      provider: "gemini",
+      provider: "openrouter",
     };
     return { success: true, data };
   } catch (err) {
-    console.error("Gemini analysis failed:", err);
-    return { success: false, error: "Failed to analyze image with Gemini. Please try again." };
+    console.error("OpenRouter vision analysis failed:", err);
+    return { success: false, error: "Failed to analyze image with OpenRouter. Please try again." };
   }
 }

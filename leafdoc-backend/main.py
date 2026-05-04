@@ -7,7 +7,8 @@ GET  /                    – health ping
 GET  /health              – detailed health (model_loaded, classes_count, ...)
 GET  /supported-classes   – list of classes the custom model can predict, grouped by species
 POST /predict             – classify an uploaded image; returns AnalysisResult or rejection
-POST /qna                 – Gemini-backed Q&A about a previously identified disease
+POST /qna                 – OpenRouter-backed Q&A about a previously identified disease
+                            (uses the OpenAI SDK pointed at OpenRouter's free-tier endpoint)
 
 Inference flow for /predict:
   1. Run leaf-vs-not-leaf gate. If leaf_prob < LEAF_THRESHOLD -> respond status="not_a_leaf".
@@ -58,8 +59,11 @@ LEAF_THRESHOLD = float(os.getenv("LEAF_THRESHOLD", "0.5"))
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.60"))
 ENTROPY_THRESHOLD = float(os.getenv("ENTROPY_THRESHOLD", "2.5"))  # max possible for 38 classes ≈ 3.64
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_TEXT_MODEL = os.getenv(
+    "OPENROUTER_TEXT_MODEL", "meta-llama/llama-3.3-70b-instruct:free"
+)
 
 IMG_SIZE = (224, 224)
 
@@ -78,7 +82,7 @@ disease_info: Dict[str, Any] = {}
 
 app = FastAPI(
     title="LeafDoc Plant Disease Prediction API",
-    description="Custom MobileNetV3 classifier for plant leaf diseases + Gemini-backed Q&A.",
+    description="Custom MobileNetV3 classifier for plant leaf diseases + OpenRouter-backed Q&A.",
     version="2.0.0",
 )
 
@@ -357,7 +361,7 @@ async def predict(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------
-# Q&A endpoint (Gemini)
+# Q&A endpoint (OpenRouter via OpenAI SDK)
 # ----------------------------------------------------------------------------
 
 class QnaMessage(BaseModel):
@@ -373,23 +377,30 @@ class QnaRequest(BaseModel):
 
 @app.post("/qna")
 async def qna(req: QnaRequest) -> Dict[str, Any]:
-    if not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "your_openrouter_api_key_here":
         raise HTTPException(
             status_code=503,
-            detail="GEMINI_API_KEY is not configured in the backend .env file.",
+            detail="OPENROUTER_API_KEY is not configured in the backend .env file.",
         )
 
     # Lazy import so the backend still boots without the SDK installed
     try:
-        from google import genai  # type: ignore
-        from google.genai import types as genai_types  # type: ignore
+        from openai import OpenAI  # type: ignore
     except ImportError as exc:  # pragma: no cover
         raise HTTPException(
             status_code=500,
-            detail="google-genai is not installed. Run `pip install -r requirements.txt`.",
+            detail="openai package is not installed. Run `pip install -r requirements.txt`.",
         ) from exc
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url=OPENROUTER_BASE_URL,
+        default_headers={
+            # OpenRouter analytics headers (optional but recommended)
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "LeafDoc-Backend",
+        },
+    )
 
     system_instruction = (
         "You are LeafDoc, a friendly and knowledgeable plant pathology assistant. "
@@ -401,29 +412,26 @@ async def qna(req: QnaRequest) -> Dict[str, Any]:
         "Use simple bullet points when listing actions."
     )
 
-    contents: List[genai_types.Content] = []
+    # OpenAI chat-completions format. History is plain {role, content} pairs;
+    # both "user" and "assistant" map directly.
+    messages: List[Dict[str, str]] = [{"role": "system", "content": system_instruction}]
     for msg in req.history:
-        role = "user" if msg.role == "user" else "model"
-        contents.append(
-            genai_types.Content(role=role, parts=[genai_types.Part.from_text(text=msg.content)])
-        )
-    contents.append(
-        genai_types.Content(role="user", parts=[genai_types.Part.from_text(text=req.question)])
-    )
+        role = msg.role if msg.role in ("user", "assistant") else "user"
+        messages.append({"role": role, "content": msg.content})
+    messages.append({"role": "user", "content": req.question})
 
     try:
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=contents,
-            config=genai_types.GenerateContentConfig(system_instruction=system_instruction),
+        response = client.chat.completions.create(
+            model=OPENROUTER_TEXT_MODEL,
+            messages=messages,  # type: ignore[arg-type]
         )
-        answer = (response.text or "").strip()
+        answer = ((response.choices[0].message.content or "") if response.choices else "").strip()
         if not answer:
             answer = "I couldn't generate a response. Please try rephrasing your question."
         return {"answer": answer}
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Gemini Q&A failed.")
-        raise HTTPException(status_code=502, detail=f"Gemini call failed: {exc}") from exc
+        logger.exception("OpenRouter Q&A failed.")
+        raise HTTPException(status_code=502, detail=f"OpenRouter call failed: {exc}") from exc
 
 
 # ----------------------------------------------------------------------------

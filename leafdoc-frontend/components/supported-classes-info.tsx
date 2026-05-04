@@ -6,7 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Info, Leaf, AlertTriangle } from "lucide-react";
-import type { SupportedClasses } from "@/lib/gemini";
+import type { SupportedClasses } from "@/lib/types";
 import { getSupportedClassesAction } from "@/app/actions/supported-classes";
 
 export function SupportedClassesInfo() {

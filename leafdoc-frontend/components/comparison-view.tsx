@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnalysisResult } from "@/lib/gemini";
+import type { AnalysisResult } from "@/lib/types";
 import {
   Card,
   CardContent,

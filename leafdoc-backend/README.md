@@ -1,8 +1,9 @@
 # LeafDoc Backend
 
 FastAPI service that wraps a **MobileNetV3** plant-disease classifier and a
-**leaf-vs-not-leaf** gate trained on Google Colab, plus a Gemini-backed Q&A
-endpoint for follow-up questions about a detected disease.
+**leaf-vs-not-leaf** gate trained on Google Colab, plus an OpenRouter-backed Q&A
+endpoint (using free-tier models via the OpenAI SDK) for follow-up questions
+about a detected disease.
 
 > **Heads up:** training has moved to Google Colab (free T4 GPU). See
 > [`colab/README.md`](colab/README.md) for the full training walkthrough.
@@ -24,7 +25,7 @@ endpoint for follow-up questions about a detected disease.
 
         POST /qna  (disease_name, question, history[])
                        │
-                       └──►  Gemini (server-side)
+                       └──►  OpenRouter (server-side, OpenAI SDK)
 
         GET  /health             health + thresholds
         GET  /supported-classes  list of classes the model can predict
@@ -36,7 +37,8 @@ endpoint for follow-up questions about a detected disease.
 
 - Python 3.10+
 - A trained model produced by [`colab/train_on_colab.ipynb`](colab/train_on_colab.ipynb)
-- (Optional) A Gemini API key for the `/qna` endpoint
+- (Optional) An OpenRouter API key for the `/qna` endpoint — free tier works fine.
+  Get one at <https://openrouter.ai/keys>.
 
 ---
 
@@ -83,8 +85,10 @@ ENTROPY_THRESHOLD=2.5
 
 ALLOWED_ORIGINS=*
 
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.0-flash-lite
+# OpenRouter (free tier) – get your key at https://openrouter.ai/keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_TEXT_MODEL=meta-llama/llama-3.3-70b-instruct:free
 ```
 
 ---
@@ -183,7 +187,7 @@ Body:
 }
 ```
 
-Returns `{ "answer": "..." }`. Calls Gemini server-side using `GEMINI_API_KEY`.
+Returns `{ "answer": "..." }`. Calls OpenRouter server-side using `OPENROUTER_API_KEY`.
 
 ---
 
@@ -231,4 +235,4 @@ It **cannot** detect:
 
 The leaf gate + confidence threshold + entropy threshold combine to *reject*
 out-of-scope inputs rather than confidently lying. For anything outside the
-supported list, use the **Gemini provider** in the frontend.
+supported list, use the **OpenRouter provider** in the frontend.
