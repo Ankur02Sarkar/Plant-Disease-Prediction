@@ -1044,8 +1044,10 @@ def page_limitations(pdf: PdfPages, page: int, total: int) -> None:
 
     fig.text(0.06, 0.46, "Future work", fontsize=12, fontweight="bold")
     future = [
-        "1.  Confusion matrix and per-class accuracy. Requires re-running validation with "
-        "per-class predictions — the current paper-asset script does not load the model.",
+        "1.  Cross-dataset generalisation. The model is trained and validated on the same "
+        "PlantVillage distribution (studio lighting, uniform background). Performance on "
+        "field photographs with cluttered backgrounds, variable lighting, or partial occlusion "
+        "is not yet characterised — a held-out real-world test set is needed.",
         "2.  Dataset expansion. Combine PlantVillage with PlantDoc, Mendeley plant disease "
         "sets, or regional crop datasets to extend species coverage.",
         "3.  Quantization. TFLite int8 quantization to enable mobile inference at <10 MB "
@@ -1119,7 +1121,253 @@ def page_references(pdf: PdfPages, page: int, total: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Page 17 — End-to-end system flow
+# Confusion matrix data loader
+# ---------------------------------------------------------------------------
+
+CM_JSON_PATH = OUTPUT_DIR / "confusion_matrix.json"
+
+def _load_cm_data() -> dict | None:
+    """Return parsed confusion_matrix.json or None if not yet computed."""
+    if not CM_JSON_PATH.exists():
+        return None
+    with CM_JSON_PATH.open() as f:
+        return json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# Page 17 — Confusion matrix heatmap
+# ---------------------------------------------------------------------------
+
+def page_confusion_matrix_heatmap(pdf: PdfPages, page: int, total: int) -> None:
+    cm_data = _load_cm_data()
+
+    fig = plt.figure(figsize=PAGE_SIZE)
+    _add_page_header(fig, "Confusion Matrix — Validation Set", page, total)
+
+    if cm_data is None:
+        ax = fig.add_axes([0.1, 0.3, 0.8, 0.5])
+        ax.axis("off")
+        ax.text(0.5, 0.5,
+                "confusion_matrix.json not found.\n"
+                "Run:  python research/compute_confusion_matrix.py",
+                ha="center", va="center", fontsize=14, color="red",
+                transform=ax.transAxes)
+        pdf.savefig(fig, dpi=DPI, bbox_inches="tight")
+        fig.savefig(FIGURES_DIR / "17_confusion_matrix.png", dpi=DPI, bbox_inches="tight")
+        plt.close(fig)
+        return
+
+    matrix      = np.array(cm_data["matrix"], dtype=np.float64)
+    short_labels = cm_data["short_labels"]
+    n            = len(short_labels)
+    acc          = cm_data["overall_accuracy"]
+    total_imgs   = cm_data["total_images"]
+
+    # ------------------------------------------------------------------
+    # Axes layout: tight square heatmap leaving room for header + caption
+    # ------------------------------------------------------------------
+    ax = fig.add_axes([0.14, 0.10, 0.72, 0.80])
+
+    # Log-normalise so rare off-diagonal errors are still visible.
+    # Replace zeros with NaN so they render as the bottom colour.
+    matrix_plot = matrix.copy()
+    matrix_plot[matrix_plot == 0] = np.nan
+
+    from matplotlib.colors import LogNorm
+    vmin = 1
+    vmax = float(np.nanmax(matrix_plot))
+    norm = LogNorm(vmin=vmin, vmax=vmax)
+
+    cmap = plt.cm.get_cmap("YlOrRd").copy()
+    cmap.set_bad(color="#f5f5f5")          # zero cells → light grey
+
+    im = ax.imshow(matrix_plot, aspect="auto", cmap=cmap, norm=norm)
+
+    # Colourbar
+    cbar_ax = fig.add_axes([0.875, 0.10, 0.018, 0.80])
+    cbar = fig.colorbar(im, cax=cbar_ax)
+    cbar.set_label("Count (log scale)", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+
+    # Tick labels
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(short_labels, rotation=45, ha="right", fontsize=5.5)
+    ax.set_yticklabels(short_labels, fontsize=5.5)
+    ax.set_xlabel("Predicted class", fontsize=9, labelpad=6)
+    ax.set_ylabel("True class", fontsize=9, labelpad=6)
+    ax.set_title(
+        f"38-class confusion matrix  ·  {total_imgs:,} validation images  ·  "
+        f"Accuracy {acc*100:.2f}%",
+        fontsize=10, fontweight="bold", pad=8
+    )
+
+    # Annotate diagonal (correct) with white text
+    for i in range(n):
+        val = int(matrix[i, i])
+        ax.text(i, i, str(val),
+                ha="center", va="center", fontsize=4.5,
+                color="white", fontweight="bold")
+
+    # Annotate notable off-diagonal errors (≥ 5) with dark text
+    for i in range(n):
+        for j in range(n):
+            if i != j and matrix[i, j] >= 5:
+                ax.text(j, i, str(int(matrix[i, j])),
+                        ha="center", va="center", fontsize=4,
+                        color="#222222")
+
+    pdf.savefig(fig, dpi=DPI, bbox_inches="tight")
+    fig.savefig(FIGURES_DIR / "17_confusion_matrix.png", dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Page 18 — Per-class F1 bars + top misclassification pairs
+# ---------------------------------------------------------------------------
+
+def page_confusion_matrix_analysis(pdf: PdfPages, page: int, total: int) -> None:
+    cm_data = _load_cm_data()
+
+    fig = plt.figure(figsize=PAGE_SIZE)
+    _add_page_header(fig, "Confusion Matrix — Per-Class Analysis", page, total)
+
+    if cm_data is None:
+        ax = fig.add_axes([0.1, 0.3, 0.8, 0.5])
+        ax.axis("off")
+        ax.text(0.5, 0.5, "confusion_matrix.json not found.",
+                ha="center", va="center", fontsize=14, color="red",
+                transform=ax.transAxes)
+        pdf.savefig(fig, dpi=DPI, bbox_inches="tight")
+        fig.savefig(FIGURES_DIR / "18_confusion_matrix_analysis.png", dpi=DPI, bbox_inches="tight")
+        plt.close(fig)
+        return
+
+    per_class   = cm_data["per_class"]
+    matrix      = np.array(cm_data["matrix"], dtype=np.int64)
+    short_labels = cm_data["short_labels"]
+    acc          = cm_data["overall_accuracy"]
+    macro_f1     = cm_data["macro_f1"]
+    weighted_f1  = cm_data["weighted_f1"]
+    total_imgs   = cm_data["total_images"]
+    total_correct = cm_data["total_correct"]
+
+    # ------------------------------------------------------------------
+    # Panel A (top half) — Per-class F1 horizontal bar chart
+    # Sorted ascending so the worst classes are at top (eye reads top→down)
+    # ------------------------------------------------------------------
+    sorted_pc = sorted(per_class, key=lambda x: x["f1"])
+    f1_vals   = [p["f1"]   for p in sorted_pc]
+    labels    = [p["short"] for p in sorted_pc]
+    supports  = [p["support"] for p in sorted_pc]
+
+    # Colour: green ≥ 0.97, yellow 0.90–0.97, red < 0.90
+    bar_colors = []
+    for v in f1_vals:
+        if v >= 0.97:
+            bar_colors.append(COLORS["leaf"])
+        elif v >= 0.90:
+            bar_colors.append(COLORS["threshold"])
+        else:
+            bar_colors.append(COLORS["non_leaf"])
+
+    ax_bar = fig.add_axes([0.28, 0.48, 0.66, 0.44])
+    bars = ax_bar.barh(labels, f1_vals, color=bar_colors,
+                       edgecolor="none", height=0.75)
+
+    # Annotate each bar with its F1 value and support count
+    for bar, val, sup in zip(bars, f1_vals, supports):
+        ax_bar.text(val + 0.002, bar.get_y() + bar.get_height() / 2,
+                    f"{val*100:.1f}%  (n={sup})",
+                    va="center", fontsize=5.5, color="#333")
+
+    ax_bar.set_xlim(0, 1.12)
+    ax_bar.set_xlabel("F1 score", fontsize=9)
+    ax_bar.set_title("Per-class F1 score (sorted ascending — worst at top)",
+                     fontsize=10, fontweight="bold")
+    ax_bar.set_yticklabels(labels, fontsize=5.5)
+    ax_bar.axvline(0.97, color=COLORS["leaf"],      linestyle=":", linewidth=1,
+                   label="≥ 0.97 (green)")
+    ax_bar.axvline(0.90, color=COLORS["threshold"], linestyle=":", linewidth=1,
+                   label="≥ 0.90 (yellow)")
+    ax_bar.legend(loc="lower right", fontsize=7, framealpha=0.8)
+
+    # ------------------------------------------------------------------
+    # Panel B (bottom half) — Top-10 worst misclassification pairs table
+    # ------------------------------------------------------------------
+    n = len(short_labels)
+    pairs = []
+    for i in range(n):
+        for j in range(n):
+            if i != j and matrix[i, j] > 0:
+                pairs.append((int(matrix[i, j]), short_labels[i], short_labels[j]))
+    pairs.sort(reverse=True)
+    top_pairs = pairs[:10]
+
+    ax_tbl = fig.add_axes([0.06, 0.07, 0.88, 0.34])
+    ax_tbl.axis("off")
+
+    ax_tbl.text(0.0, 1.01, "Top-10 most frequent misclassifications",
+                ha="left", va="bottom", fontsize=10, fontweight="bold",
+                transform=ax_tbl.transAxes)
+
+    col_labels = ["Rank", "True class", "Predicted as", "Count",
+                  "% of true class"]
+    rows_data = []
+    for rank, (count, true_lbl, pred_lbl) in enumerate(top_pairs, 1):
+        true_idx = short_labels.index(true_lbl)
+        true_support = int(matrix[true_idx].sum())
+        pct = count / true_support * 100 if true_support else 0
+        rows_data.append([
+            str(rank),
+            true_lbl,
+            pred_lbl,
+            str(count),
+            f"{pct:.1f}%",
+        ])
+
+    table = ax_tbl.table(
+        cellText=rows_data,
+        colLabels=col_labels,
+        colWidths=[0.06, 0.34, 0.34, 0.10, 0.16],
+        cellLoc="left",
+        loc="upper left",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+    table.scale(1.0, 1.55)
+
+    for (r, c), cell in table.get_celld().items():
+        cell.set_edgecolor("#dddddd")
+        if r == 0:
+            cell.set_facecolor(COLORS["highlight"])
+            cell.set_text_props(color="white", fontweight="bold")
+        elif r % 2 == 0:
+            cell.set_facecolor("#f7f7f7")
+
+    # ------------------------------------------------------------------
+    # Summary stat box
+    # ------------------------------------------------------------------
+    stat_text = (
+        f"Overall accuracy : {acc*100:.2f}%   "
+        f"({total_correct:,} / {total_imgs:,} correct)\n"
+        f"Macro F1         : {macro_f1*100:.2f}%\n"
+        f"Weighted F1      : {weighted_f1*100:.2f}%"
+    )
+    fig.text(
+        0.06, 0.045, stat_text,
+        ha="left", va="bottom", fontsize=9, family="monospace",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor=COLORS["bg_panel"],
+                  edgecolor=COLORS["neutral"], linewidth=0.7),
+    )
+
+    pdf.savefig(fig, dpi=DPI, bbox_inches="tight")
+    fig.savefig(FIGURES_DIR / "18_confusion_matrix_analysis.png", dpi=DPI, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Page 19 — End-to-end system flow
 # ---------------------------------------------------------------------------
 
 def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
@@ -1197,7 +1445,7 @@ def page_end_to_end(pdf: PdfPages, page: int, total: int) -> None:
             "The browser never holds the OpenRouter API key or the backend URL.",
             fontsize=9, style="italic", color="#333")
 
-    _save_page(fig, pdf, "17_end_to_end_system.png")
+    _save_page(fig, pdf, "19_end_to_end_system.png")
 
 
 # ---------------------------------------------------------------------------
@@ -1275,23 +1523,25 @@ def main() -> None:
     print(f"  wrote {TABLES_CSV_PATH.relative_to(SCRIPT_DIR.parent.parent)}")
 
     pages = [
-        page_title,
-        page_abstract,
-        page_inference_flow,
-        page_dataset,
-        page_training_curves,
-        page_stage_comparison,
-        page_score_distributions,
-        page_threshold_sweep,
-        page_epoch_times,
-        page_sample_inference,
-        page_three_state,
-        page_code_disease,
-        page_code_pipeline,
-        page_hyperparameters,
-        page_limitations,
-        page_references,
-        page_end_to_end,
+        page_title,                       # 1
+        page_abstract,                    # 2
+        page_inference_flow,              # 3
+        page_dataset,                     # 4
+        page_training_curves,             # 5
+        page_stage_comparison,            # 6
+        page_score_distributions,         # 7
+        page_threshold_sweep,             # 8
+        page_epoch_times,                 # 9
+        page_sample_inference,            # 10
+        page_three_state,                 # 11
+        page_code_disease,                # 12
+        page_code_pipeline,               # 13
+        page_hyperparameters,             # 14
+        page_limitations,                 # 15
+        page_references,                  # 16
+        page_confusion_matrix_heatmap,    # 17
+        page_confusion_matrix_analysis,   # 18
+        page_end_to_end,                  # 19
     ]
     total = len(pages)
 
@@ -1305,7 +1555,7 @@ def main() -> None:
         info["Title"] = "LeafDoc — Research Paper Assets"
         info["Author"] = "LeafDoc training pipeline"
         info["Subject"] = "Two-Stage MobileNetV3 Plant Disease Classifier"
-        info["Keywords"] = "plant disease, MobileNetV3, transfer learning, FastAPI, Gemini"
+        info["Keywords"] = "plant disease, MobileNetV3, transfer learning, FastAPI, OpenRouter, confusion matrix"
         info["CreationDate"] = datetime.now()
 
     print(f"\nPDF: {PDF_PATH}")
