@@ -29,11 +29,20 @@ Outputs
 
 Usage
 -----
-    # From leafdoc-backend/ with venv active:
+    # Mac — uses built-in default path, no argument needed:
     python research/compute_confusion_matrix.py
 
-    # Or from repo root:
-    python leafdoc-backend/research/compute_confusion_matrix.py
+    # Windows — pass the validation folder explicitly:
+    python research/compute_confusion_matrix.py --valid-dir "C:\\Users\\ankur\\...\\valid"
+
+    # All overrides (any platform):
+    python research/compute_confusion_matrix.py \\
+        --valid-dir "C:\\path\\to\\valid" \\
+        --model     "C:\\path\\to\\plant_disease_model.keras" \\
+        --output    "C:\\path\\to\\output\\confusion_matrix.json"
+
+    # Show help:
+    python research/compute_confusion_matrix.py --help
 
 Runtime
 -------
@@ -43,6 +52,7 @@ Runtime
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -52,28 +62,81 @@ from pathlib import Path
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Paths — resolve relative to this script's location
+# Fixed paths (relative to this script) — overridable via CLI args below
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR   = Path(__file__).resolve().parent
 BACKEND_DIR  = SCRIPT_DIR.parent
-OUTPUT_DIR   = SCRIPT_DIR / "output"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MODEL_PATH        = BACKEND_DIR / "models" / "plant_disease_model.keras"
-CLASS_INDICES_PATH = BACKEND_DIR / "models" / "class_indices.json"
-CM_JSON_PATH      = OUTPUT_DIR / "confusion_matrix.json"
-
-VALID_DIR = Path(
-    "/Users/ankur/Web Dev/Projects/Plant Disease Prediction"
-    "/leafdoc-backend/new-plant-diseases-dataset"
-    "/New Plant Diseases Dataset(Augmented)"
-    "/New Plant Diseases Dataset(Augmented)"
-    "/valid"
+_DEFAULT_VALID_DIR = (
+    BACKEND_DIR
+    / "new-plant-diseases-dataset"
+    / "New Plant Diseases Dataset(Augmented)"
+    / "New Plant Diseases Dataset(Augmented)"
+    / "valid"
 )
+_DEFAULT_MODEL_PATH  = BACKEND_DIR / "models" / "plant_disease_model.keras"
+_DEFAULT_OUTPUT_DIR  = SCRIPT_DIR / "output"
 
 IMG_SIZE   = (224, 224)
 BATCH_SIZE = 32
+
+
+# ---------------------------------------------------------------------------
+# CLI argument parsing
+# ---------------------------------------------------------------------------
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="LeafDoc — compute 38×38 confusion matrix from the validation set.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples
+--------
+  # Mac (default paths — no arguments needed):
+  python research/compute_confusion_matrix.py
+
+  # Windows:
+  python research\\compute_confusion_matrix.py --valid-dir "C:\\Users\\ankur\\datasets\\valid"
+
+  # Override everything:
+  python research/compute_confusion_matrix.py \\
+      --valid-dir /data/valid \\
+      --model     /data/models/plant_disease_model.keras \\
+      --output    /data/output/confusion_matrix.json
+        """,
+    )
+    p.add_argument(
+        "--valid-dir",
+        type=Path,
+        default=_DEFAULT_VALID_DIR,
+        metavar="PATH",
+        help=(
+            "Path to the validation dataset folder (contains one sub-folder per class). "
+            f"Default: {_DEFAULT_VALID_DIR}"
+        ),
+    )
+    p.add_argument(
+        "--model",
+        type=Path,
+        default=_DEFAULT_MODEL_PATH,
+        metavar="PATH",
+        help=(
+            "Path to plant_disease_model.keras. "
+            f"Default: {_DEFAULT_MODEL_PATH}"
+        ),
+    )
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Where to write confusion_matrix.json. "
+            "Default: <script-dir>/output/confusion_matrix.json"
+        ),
+    )
+    return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +190,29 @@ def _make_short_labels(labels: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    args = _parse_args()
+
+    # Resolve paths from args
+    MODEL_PATH         = args.model.resolve()
+    VALID_DIR          = args.valid_dir.resolve()
+    CLASS_INDICES_PATH = MODEL_PATH.parent / "class_indices.json"
+
+    if args.output is not None:
+        CM_JSON_PATH = args.output.resolve()
+        CM_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = _DEFAULT_OUTPUT_DIR
+        out_dir.mkdir(parents=True, exist_ok=True)
+        CM_JSON_PATH = out_dir / "confusion_matrix.json"
+
+    print("=" * 60)
+    print("LeafDoc — Confusion Matrix Computer")
+    print("=" * 60)
+    print(f"  Model     : {MODEL_PATH}")
+    print(f"  Valid dir : {VALID_DIR}")
+    print(f"  Output    : {CM_JSON_PATH}")
+    print()
+
     # ------------------------------------------------------------------
     # Pre-flight checks
     # ------------------------------------------------------------------
